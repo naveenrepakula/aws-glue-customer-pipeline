@@ -30,3 +30,12 @@ output/
 
 
 
+
+# Local ETL validation output
+local_output/
+
+# Generated AWS Glue library package
+glue_libs.zip
+
+# Superseded IAM policy copy
+coadp-glue-s3-policy.json
