@@ -1,0 +1,23 @@
+
+{
+  "Name": "COADP-Customer-ETL-DEV",
+  "Role": "arn:aws:iam::439701543859:role/COADP-Glue-ExecutionRole-DEV",
+  "Command": {
+    "Name": "glueetl",
+    "ScriptLocation": "s3://customer-pipeline-dev-439701543859-glue-artifacts/glue/scripts/customer_etl.py",
+    "PythonVersion": "3"
+  },
+  "GlueVersion": "5.0",
+  "WorkerType": "G.1X",
+  "NumberOfWorkers": 2,
+  "Timeout": 10,
+  "MaxRetries": 0,
+  "DefaultArguments": {
+    "--job-language": "python",
+    "--extra-py-files": "s3://customer-pipeline-dev-439701543859-glue-artifacts/glue/libraries/glue_libs.zip",
+    "--input_path": "s3://customer-pipeline-dev-439701543859-data/raw/customers/customers.csv",
+    "--curated_path": "s3://customer-pipeline-dev-439701543859-data/curated/customers/dev-test/",
+    "--rejected_path": "s3://customer-pipeline-dev-439701543859-data/rejected/customers/dev-test/",
+    "--enable-job-insights": "true"
+  }
+}

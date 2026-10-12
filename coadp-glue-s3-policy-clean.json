@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListProjectBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": [
+        "arn:aws:s3:::customer-pipeline-dev-439701543859-data",
+        "arn:aws:s3:::customer-pipeline-dev-439701543859-glue-artifacts"
+      ]
+    },
+    {
+      "Sid": "ReadDeploymentArtifacts",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::customer-pipeline-dev-439701543859-glue-artifacts/glue/*"
+    },
+    {
+      "Sid": "ReadAndWriteDevCustomerData",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::customer-pipeline-dev-439701543859-data/*"
+    }
+  ]
+}
