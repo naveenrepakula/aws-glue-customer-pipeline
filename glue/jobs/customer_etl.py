@@ -8,6 +8,7 @@ from pyspark.context import SparkContext
 from glue.libraries.transformations import (
     CUSTOMER_SCHEMA,
     transform_customer_data,
+    calculate_data_quality_metrics,
 )
 
 args = getResolvedOptions(
@@ -41,6 +42,21 @@ customer_df = (
 )
 
 valid_df, rejected_df = transform_customer_data(customer_df)
+
+
+# Calculate data quality metrics
+dq_metrics = calculate_data_quality_metrics(
+    valid_df,
+    rejected_df,
+)
+
+# Log metrics to AWS Glue / CloudWatch
+logger = glue_context.get_logger()
+
+logger.info(
+    f"Customer Data Quality Metrics: {dq_metrics}"
+)
+
 
 valid_df.write.mode("overwrite").parquet(curated_path)
 

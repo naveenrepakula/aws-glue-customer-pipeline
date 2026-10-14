@@ -1,6 +1,6 @@
 from datetime import date
-
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
 
 from glue.libraries.transformations import (
     CUSTOMER_SCHEMA,
@@ -8,6 +8,7 @@ from glue.libraries.transformations import (
     clean_customer_data,
     split_valid_rejected,
     transform_customer_data,
+    calculate_data_quality_metrics,
 )
 
 
@@ -156,3 +157,272 @@ def test_transform_customer_data():
     # Verify rejected customer
     assert rejected_customer["customer_id"] == "1004"
     assert rejected_customer["rejection_reason"] == "MISSING_EMAIL"
+
+
+def test_invalid_email_format_rejection():
+    # ARRANGE: Prepare test data
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-invalid-email")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1002",
+            "Rahul",
+            "Kumar",
+            "rahulgmail.com",
+            "9876543210",
+            "India",
+            date(2026, 10, 10),
+        )
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+    expected_reason = "INVALID_EMAIL_FORMAT"
+
+    # ACT: Execute the transformation
+    result_df = add_rejection_reason(df)
+    actual_reason = result_df.collect()[0]["rejection_reason"]
+
+    # ASSERT: Verify expected vs actual
+    assert actual_reason == expected_reason
+
+
+def test_duplicate_customer_id_rejection():
+    # ARRANGE: Prepare duplicate customer records
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-duplicate-customers")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1001", "Rahul", "Kumar",
+            "rahul@gmail.com", "9876543210",
+            "India", date(2026, 10, 10),
+        ),
+        (
+            "1001", "Kiran", "Rao",
+            "kiran@gmail.com", "9876543211",
+            "India", date(2026, 10, 11),
+        ),
+        (
+            "1002", "Naveen", "Repakula",
+            "naveen@gmail.com", "9876543212",
+            "India", date(2026, 10, 12),
+        ),
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_duplicate_count = 2
+    expected_reason = "DUPLICATE_CUSTOMER_ID"
+
+    # ACT: Execute the complete transformation
+    valid_df, rejected_df = transform_customer_data(df)
+
+    duplicate_df = rejected_df.filter(
+        col("rejection_reason") == expected_reason
+    )
+
+    actual_duplicate_count = duplicate_df.count()
+
+    # ASSERT: Verify duplicate handling
+    assert actual_duplicate_count == expected_duplicate_count
+    assert valid_df.count() == 1
+
+
+def test_multiple_rejection_reasons():
+    # ARRANGE: Customer has two validation errors
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-multiple-rejection-reasons")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1003",
+            "",                    # Missing first name
+            "Kumar",
+            "invalidemail.com",    # Invalid email format
+            "9876543210",
+            "India",
+            date(2026, 10, 10),
+        )
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_reasons = {
+        "MISSING_FIRST_NAME",
+        "INVALID_EMAIL_FORMAT",
+    }
+
+    # ACT: Run the customer transformation
+    valid_df, rejected_df = transform_customer_data(df)
+
+    actual_reasons = set(
+        rejected_df.collect()[0]["rejection_reasons"]
+    )
+
+    # ASSERT: Both errors must be captured
+    assert actual_reasons == expected_reasons
+    assert valid_df.count() == 0
+
+
+def test_duplicate_id_with_multiple_rejection_reasons():
+    # ARRANGE
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-duplicate-multiple-errors")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1001", "", "Kumar",
+            "rahul@gmail.com", "9876543210",
+            "India", date(2026, 10, 10),
+        ),
+        (
+            "1001", "Kiran", "Rao",
+            "kiran@gmail.com", "9876543211",
+            "India", date(2026, 10, 11),
+        ),
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_reasons = {
+        "MISSING_FIRST_NAME",
+        "DUPLICATE_CUSTOMER_ID",
+    }
+
+    # ACT
+    valid_df, rejected_df = transform_customer_data(df)
+
+    customer = rejected_df.filter(
+        col("first_name") == ""
+    ).collect()[0]
+
+    actual_reasons = set(customer["rejection_reasons"])
+
+    # ASSERT
+    assert actual_reasons == expected_reasons
+    assert valid_df.count() == 0
+
+
+def test_customer_data_quality_metrics():
+    # ARRANGE
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-data-quality-metrics")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1001", "Rahul", "Kumar",
+            "rahul@gmail.com", "9876543210",
+            "India", date(2026, 10, 10),
+        ),
+        (
+            "1002", "", "Rao",
+            "kiran@gmail.com", "9876543211",
+            "India", date(2026, 10, 11),
+        ),
+        (
+            "1003", "Naveen", "Repakula",
+            "invalidemail.com", "9876543212",
+            "India", date(2026, 10, 12),
+        ),
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_metrics = {
+        "total_records": 3,
+        "valid_records": 1,
+        "rejected_records": 2,
+        "rejection_percentage": 66.67,
+    }
+
+    # ACT
+    valid_df, rejected_df = transform_customer_data(df)
+
+    actual_metrics = calculate_data_quality_metrics(
+        valid_df,
+        rejected_df,
+    )
+
+    # ASSERT
+    assert actual_metrics == expected_metrics
+
+
+def test_customer_output_schema():
+    # ARRANGE
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-customer-output-schema")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1001", "Rahul", "Kumar",
+            "rahul@gmail.com", "9876543210",
+            "India", date(2026, 10, 10),
+        ),
+        (
+            "1002", "", "Rao",
+            "invalidemail.com", "9876543211",
+            "India", date(2026, 10, 11),
+        ),
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_valid_columns = set(CUSTOMER_SCHEMA.fieldNames())
+
+    # ACT
+    valid_df, rejected_df = transform_customer_data(df)
+
+    actual_valid_columns = set(valid_df.columns)
+    actual_rejected_columns = set(rejected_df.columns)
+
+    # ASSERT
+    assert actual_valid_columns == expected_valid_columns
+
+    assert "rejection_reason" in actual_rejected_columns
+    assert "rejection_reasons" in actual_rejected_columns
+
+    assert valid_df.count() == 1
+    assert rejected_df.count() == 1
