@@ -1,4 +1,3 @@
-
 name: AWS Glue Customer Pipeline CI/CD
 
 on:
@@ -43,41 +42,39 @@ jobs:
         run: |
           python -m pytest tests/unit/test_transformations.py -v
 
-
   deploy-dev:
-    name: Authenticate AWS for DEV Deployment
+    name: Deploy AWS Glue DEV
     needs: unit-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Inspect GitHub OIDC identity claims
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Package Glue Python libraries
         shell: bash
         run: |
           python - <<'PY'
-          import os
-          import json
-          import base64
-          import urllib.request
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
 
-          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
-          token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+          files = [
+              "glue/__init__.py",
+              "glue/libraries/__init__.py",
+              "glue/libraries/transformations.py",
+          ]
 
-          separator = "&" if "?" in url else "?"
-          request = urllib.request.Request(
-              url + separator + "audience=sts.amazonaws.com",
-              headers={"Authorization": "Bearer " + token}
-          )
+          Path("dist").mkdir(exist_ok=True)
 
-          with urllib.request.urlopen(request) as response:
-              jwt = json.load(response)["value"]
+          with ZipFile("dist/glue_libs.zip", "w", ZIP_DEFLATED) as archive:
+              for file in files:
+                  archive.write(file, arcname=file)
 
-          payload = jwt.split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-
-          for key in ("iss", "aud", "sub", "repository", "ref", "event_name"):
-              print(f"{key}: {claims.get(key)}")
+          with ZipFile("dist/glue_libs.zip") as archive:
+              assert archive.testzip() is None
+              assert set(files).issubset(set(archive.namelist()))
+              print("Successfully packaged:", archive.namelist())
           PY
 
       - name: Configure AWS credentials using OIDC
@@ -88,3 +85,77 @@ jobs:
 
       - name: Verify AWS identity
         run: aws sts get-caller-identity
+
+      - name: Install deployment dependencies
+        run: python -m pip install boto3
+
+      - name: Upload versioned Glue artifacts to S3
+        shell: bash
+        run: |
+          RELEASE_PREFIX="s3://customer-pipeline-dev-439701543859-glue-artifacts/releases/${GITHUB_SHA}"
+
+          aws s3 cp glue/jobs/customer_etl.py \
+            "${RELEASE_PREFIX}/customer_etl.py"
+
+          aws s3 cp dist/glue_libs.zip \
+            "${RELEASE_PREFIX}/glue_libs.zip"
+
+          echo "Uploaded Glue artifacts to ${RELEASE_PREFIX}"
+
+      - name: Update AWS Glue DEV job
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import boto3
+
+          glue = boto3.client("glue", region_name="ap-south-1")
+          job_name = "COADP-Customer-ETL-DEV"
+
+          bucket = "customer-pipeline-dev-439701543859-glue-artifacts"
+          release = f"s3://{bucket}/releases/{os.environ['GITHUB_SHA']}"
+
+          job = glue.get_job(JobName=job_name)["Job"]
+
+          command = dict(job["Command"])
+          command["ScriptLocation"] = f"{release}/customer_etl.py"
+
+          arguments = dict(job.get("DefaultArguments", {}))
+          arguments["--extra-py-files"] = f"{release}/glue_libs.zip"
+
+          update = {
+              "Role": job["Role"],
+              "Command": command,
+              "DefaultArguments": arguments,
+              "GlueVersion": job["GlueVersion"],
+              "WorkerType": job["WorkerType"],
+              "NumberOfWorkers": job["NumberOfWorkers"],
+              "Timeout": job["Timeout"],
+              "MaxRetries": job["MaxRetries"],
+              "ExecutionProperty": job["ExecutionProperty"],
+              "JobMode": job["JobMode"],
+              "JobRunQueuingEnabled": job["JobRunQueuingEnabled"],
+          }
+
+          optional_fields = [
+              "Description",
+              "Connections",
+              "SecurityConfiguration",
+              "NonOverridableArguments",
+              "NotificationProperty",
+              "ExecutionClass",
+              "JobRunQueuingEnabled",
+              "MaintenanceWindow",
+              "SourceControlDetails",
+          ]
+
+          for field in optional_fields:
+              if field in job and job[field] is not None:
+                  update[field] = job[field]
+
+          glue.update_job(JobName=job_name, JobUpdate=update)
+
+          print(f"Updated Glue job: {job_name}")
+          print(f"Script: {command['ScriptLocation']}")
+          print(f"Libraries: {arguments['--extra-py-files']}")
+          PY
