@@ -1,0 +1,40 @@
+
+name: AWS Glue Customer Pipeline CI/CD
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  unit-tests:
+    name: Run PySpark Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyspark==3.5.6 pytest
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/unit/test_transformations.py -v
