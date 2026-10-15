@@ -133,8 +133,6 @@ jobs:
               "Timeout": job["Timeout"],
               "MaxRetries": job["MaxRetries"],
               "ExecutionProperty": job["ExecutionProperty"],
-              "JobMode": job["JobMode"],
-              "JobRunQueuingEnabled": job["JobRunQueuingEnabled"],
           }
 
           optional_fields = [
@@ -147,6 +145,8 @@ jobs:
               "JobRunQueuingEnabled",
               "MaintenanceWindow",
               "SourceControlDetails",
+              "JobMode",
+              "JobRunQueuingEnabled",
           ]
 
           for field in optional_fields:
