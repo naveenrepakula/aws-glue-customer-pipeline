@@ -39,3 +39,7 @@ glue_libs.zip
 
 # Superseded IAM policy copy
 coadp-glue-s3-policy.json
+github-cicd-permissions.json
+github-oidc-trust-policy.json
+glue-s3-policy-backup.json
+glue-s3-policy-updated.json
