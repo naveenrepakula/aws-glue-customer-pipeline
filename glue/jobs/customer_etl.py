@@ -1,4 +1,8 @@
 import sys
+import json
+import boto3
+
+from datetime import datetime, timezone
 
 from awsglue.context import GlueContext
 from awsglue.job import Job
@@ -11,6 +15,30 @@ from glue.libraries.transformations import (
     calculate_data_quality_metrics,
 )
 
+
+# --------------------------------------------------
+# 1. Function to write audit records to Amazon S3
+# --------------------------------------------------
+
+def write_audit_log(
+    bucket_name: str,
+    audit_key: str,
+    audit_data: dict,
+):
+    s3_client = boto3.client("s3")
+
+    s3_client.put_object(
+        Bucket=bucket_name,
+        Key=audit_key,
+        Body=json.dumps(audit_data).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+# --------------------------------------------------
+# 2. Read AWS Glue job parameters
+# --------------------------------------------------
+
 args = getResolvedOptions(
     sys.argv,
     [
@@ -18,12 +46,34 @@ args = getResolvedOptions(
         "input_path",
         "curated_path",
         "rejected_path",
+        "max_rejection_percentage",
     ],
 )
 
 input_path = args["input_path"]
 curated_path = args["curated_path"]
 rejected_path = args["rejected_path"]
+
+
+# --------------------------------------------------
+# 3. Configure S3 audit location
+# --------------------------------------------------
+
+AUDIT_BUCKET = "customer-pipeline-dev-439701543859-data"
+
+audit_timestamp = datetime.now(timezone.utc).strftime(
+    "%Y%m%dT%H%M%S%fZ"
+)
+
+AUDIT_KEY = (
+    f"audit/customers/"
+    f"{args['JOB_NAME']}/{audit_timestamp}.json"
+)
+
+
+# --------------------------------------------------
+# 4. Initialize Spark and AWS Glue
+# --------------------------------------------------
 
 sc = SparkContext.getOrCreate()
 
@@ -35,31 +85,198 @@ job = Job(glue_context)
 
 job.init(args["JOB_NAME"], args)
 
-customer_df = (
-    spark.read.option("header", True)
-    .schema(CUSTOMER_SCHEMA)
-    .csv(input_path)
-)
-
-valid_df, rejected_df = transform_customer_data(customer_df)
-
-
-# Calculate data quality metrics
-dq_metrics = calculate_data_quality_metrics(
-    valid_df,
-    rejected_df,
-)
-
-# Log metrics to AWS Glue / CloudWatch
 logger = glue_context.get_logger()
 
-logger.info(
-    f"Customer Data Quality Metrics: {dq_metrics}"
-)
+
+# --------------------------------------------------
+# 5. Initialize configuration and metrics
+# --------------------------------------------------
+
+dq_metrics = None
+MAX_REJECTION_PERCENTAGE = None
 
 
-valid_df.write.mode("overwrite").parquet(curated_path)
+# --------------------------------------------------
+# 6. Execute ETL pipeline
+# --------------------------------------------------
 
-rejected_df.write.mode("overwrite").parquet(rejected_path)
+try:
 
-job.commit()
+    # Read and validate the configured threshold
+    MAX_REJECTION_PERCENTAGE = float(
+        args["max_rejection_percentage"]
+    )
+
+    if not 0 <= MAX_REJECTION_PERCENTAGE <= 100:
+        raise ValueError(
+            "max_rejection_percentage must be between 0 and 100"
+        )
+
+    # Read customer CSV from S3
+    customer_df = (
+        spark.read
+        .option("header", True)
+        .schema(CUSTOMER_SCHEMA)
+        .csv(input_path)
+    )
+
+    # Clean, validate, and split customer records
+    valid_df, rejected_df = transform_customer_data(
+        customer_df
+    )
+
+    # Calculate data quality metrics
+    dq_metrics = calculate_data_quality_metrics(
+        customer_df,
+        valid_df,
+        rejected_df,
+    )
+
+    # Log metrics to CloudWatch
+    logger.info(
+        f"Customer Data Quality Metrics: {dq_metrics}"
+    )
+
+    # Check record count reconciliation
+    if dq_metrics["reconciliation_status"] == "FAILED":
+
+        logger.error(
+            f"Record count reconciliation failed: {dq_metrics}"
+        )
+
+        raise ValueError(
+            "ETL failed: Source and processed record "
+            "counts do not match"
+        )
+
+    # Check rejection threshold using exact counts
+    if (
+        dq_metrics["rejected_records"] * 100
+        > MAX_REJECTION_PERCENTAGE
+        * dq_metrics["source_records"]
+    ):
+
+        logger.error(
+            f"Rejection threshold exceeded: {dq_metrics}"
+        )
+
+        raise ValueError(
+            f"ETL failed: Rejection percentage "
+            f"{dq_metrics['rejection_percentage']}% "
+            f"exceeds allowed {MAX_REJECTION_PERCENTAGE}%"
+        )
+
+    # Write valid customers to S3 as Parquet
+    valid_df.write.mode("overwrite").parquet(
+        curated_path
+    )
+
+    # Write rejected customers to S3 as Parquet
+    rejected_df.write.mode("overwrite").parquet(
+        rejected_path
+    )
+
+    # Commit the Glue job after successful writes
+    job.commit()
+
+    # Prepare successful execution audit
+    audit_data = {
+        "job_name": args["JOB_NAME"],
+        "execution_timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "source_records": dq_metrics["source_records"],
+        "valid_records": dq_metrics["valid_records"],
+        "rejected_records": dq_metrics["rejected_records"],
+        "rejection_percentage": dq_metrics[
+            "rejection_percentage"
+        ],
+        "reconciliation_status": dq_metrics[
+            "reconciliation_status"
+        ],
+        "max_rejection_percentage": MAX_REJECTION_PERCENTAGE,
+        "job_status": "SUCCEEDED",
+        "error_message": None,
+    }
+
+    # Write success audit to S3
+    write_audit_log(
+        AUDIT_BUCKET,
+        AUDIT_KEY,
+        audit_data,
+    )
+
+    logger.info(
+        f"ETL success audit written to "
+        f"s3://{AUDIT_BUCKET}/{AUDIT_KEY}"
+    )
+
+
+# --------------------------------------------------
+# 7. Handle ETL failures
+# --------------------------------------------------
+
+except Exception as error:
+
+    logger.error(
+        f"Customer ETL failed: {error}"
+    )
+
+    # Prepare failed execution audit
+    failure_audit_data = {
+        "job_name": args["JOB_NAME"],
+        "execution_timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "source_records": (
+            dq_metrics["source_records"]
+            if dq_metrics is not None
+            else None
+        ),
+        "valid_records": (
+            dq_metrics["valid_records"]
+            if dq_metrics is not None
+            else None
+        ),
+        "rejected_records": (
+            dq_metrics["rejected_records"]
+            if dq_metrics is not None
+            else None
+        ),
+        "rejection_percentage": (
+            dq_metrics["rejection_percentage"]
+            if dq_metrics is not None
+            else None
+        ),
+        "reconciliation_status": (
+            dq_metrics["reconciliation_status"]
+            if dq_metrics is not None
+            else None
+        ),
+        "max_rejection_percentage": MAX_REJECTION_PERCENTAGE,
+        "job_status": "FAILED",
+        "error_message": str(error),
+    }
+
+    # Attempt to write failure audit
+    try:
+
+        write_audit_log(
+            AUDIT_BUCKET,
+            AUDIT_KEY,
+            failure_audit_data,
+        )
+
+        logger.info(
+            f"ETL failure audit written to "
+            f"s3://{AUDIT_BUCKET}/{AUDIT_KEY}"
+        )
+
+    except Exception as audit_error:
+
+        logger.error(
+            f"Failed to write failure audit: {audit_error}"
+        )
+
+    # Re-raise the original error so Glue marks the job failed
+    raise

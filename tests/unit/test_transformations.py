@@ -365,16 +365,18 @@ def test_customer_data_quality_metrics():
     )
 
     expected_metrics = {
-        "total_records": 3,
-        "valid_records": 1,
-        "rejected_records": 2,
-        "rejection_percentage": 66.67,
-    }
+    "source_records": 3,
+    "valid_records": 1,
+    "rejected_records": 2,
+    "rejection_percentage": 66.67,
+    "reconciliation_status": "PASSED",
+}
 
     # ACT
     valid_df, rejected_df = transform_customer_data(df)
 
     actual_metrics = calculate_data_quality_metrics(
+        df,
         valid_df,
         rejected_df,
     )
@@ -426,3 +428,58 @@ def test_customer_output_schema():
 
     assert valid_df.count() == 1
     assert rejected_df.count() == 1
+
+def test_reconciliation_failure():
+    # ARRANGE
+    spark = (
+        SparkSession.builder
+        .master("local[1]")
+        .appName("test-reconciliation-failure")
+        .getOrCreate()
+    )
+
+    input_data = [
+        (
+            "1001", "Rahul", "Kumar",
+            "rahul@gmail.com", "9876543210",
+            "India", date(2026, 10, 10),
+        ),
+        (
+            "1002", "", "Rao",
+            "kiran@gmail.com", "9876543211",
+            "India", date(2026, 10, 11),
+        ),
+        (
+            "1003", "Naveen", "Repakula",
+            "invalidemail.com", "9876543212",
+            "India", date(2026, 10, 12),
+        ),
+    ]
+
+    df = spark.createDataFrame(
+        input_data,
+        schema=CUSTOMER_SCHEMA,
+    )
+
+    expected_metrics = {
+        "source_records": 3,
+        "valid_records": 1,
+        "rejected_records": 1,
+        "rejection_percentage": 33.33,
+        "reconciliation_status": "FAILED",
+    }
+
+    # ACT
+    valid_df, rejected_df = transform_customer_data(df)
+
+    # Simulate losing one rejected record
+    rejected_df = rejected_df.limit(1)
+
+    actual_metrics = calculate_data_quality_metrics(
+        df,
+        valid_df,
+        rejected_df,
+    )
+
+    # ASSERT
+    assert actual_metrics == expected_metrics
