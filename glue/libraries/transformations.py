@@ -178,26 +178,34 @@ def transform_customer_data(df: DataFrame):
 
     return valid_df, rejected_df
 
-
 def calculate_data_quality_metrics(
+    source_df: DataFrame,
     valid_df: DataFrame,
     rejected_df: DataFrame,
 ) -> dict:
 
+    source_count = source_df.count()
     valid_count = valid_df.count()
     rejected_count = rejected_df.count()
 
-    total_count = valid_count + rejected_count
+    processed_count = valid_count + rejected_count
+
+    reconciliation_status = (
+        "PASSED"
+        if source_count == processed_count
+        else "FAILED"
+    )
 
     rejection_percentage = (
-        round((rejected_count / total_count) * 100, 2)
-        if total_count > 0
+        round((rejected_count / source_count) * 100, 2)
+        if source_count > 0
         else 0.0
     )
 
     return {
-        "total_records": total_count,
+        "source_records": source_count,
         "valid_records": valid_count,
         "rejected_records": rejected_count,
         "rejection_percentage": rejection_percentage,
+        "reconciliation_status": reconciliation_status,
     }
