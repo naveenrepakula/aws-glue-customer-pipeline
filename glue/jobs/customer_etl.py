@@ -1,7 +1,8 @@
 import sys
 import json
 import boto3
-
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 
 from awsglue.context import GlueContext
@@ -17,14 +18,36 @@ from glue.libraries.transformations import (
 
 
 # --------------------------------------------------
-# 1. Function to write audit records to Amazon S3
+# 1. Function to write audit records
 # --------------------------------------------------
 
 def write_audit_log(
     bucket_name: str,
     audit_key: str,
     audit_data: dict,
-):
+) -> str:
+
+    # Check whether local audit mode is enabled
+    local_audit_dir = os.getenv("COADP_LOCAL_AUDIT_DIR")
+
+    if local_audit_dir:
+
+        # Write audit JSON locally during Docker testing
+        audit_file = Path(local_audit_dir) / audit_key
+
+        audit_file.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        audit_file.write_text(
+            json.dumps(audit_data, indent=2),
+            encoding="utf-8",
+        )
+
+        return str(audit_file)
+
+    # Write audit JSON to S3 during AWS Glue execution
     s3_client = boto3.client("s3")
 
     s3_client.put_object(
@@ -33,6 +56,8 @@ def write_audit_log(
         Body=json.dumps(audit_data).encode("utf-8"),
         ContentType="application/json",
     )
+
+    return f"s3://{bucket_name}/{audit_key}"
 
 
 # --------------------------------------------------
@@ -56,7 +81,7 @@ rejected_path = args["rejected_path"]
 
 
 # --------------------------------------------------
-# 3. Configure S3 audit location
+# 3. Configure audit location
 # --------------------------------------------------
 
 AUDIT_BUCKET = "customer-pipeline-dev-439701543859-data"
@@ -93,6 +118,7 @@ logger = glue_context.get_logger()
 # --------------------------------------------------
 
 dq_metrics = None
+
 MAX_REJECTION_PERCENTAGE = None
 
 
@@ -102,17 +128,18 @@ MAX_REJECTION_PERCENTAGE = None
 
 try:
 
-    # Read and validate the configured threshold
+    # Read and validate the configured rejection threshold
     MAX_REJECTION_PERCENTAGE = float(
         args["max_rejection_percentage"]
     )
 
     if not 0 <= MAX_REJECTION_PERCENTAGE <= 100:
+
         raise ValueError(
             "max_rejection_percentage must be between 0 and 100"
         )
 
-    # Read customer CSV from S3
+    # Read customer CSV
     customer_df = (
         spark.read
         .option("header", True)
@@ -132,7 +159,7 @@ try:
         rejected_df,
     )
 
-    # Log metrics to CloudWatch
+    # Log data quality metrics
     logger.info(
         f"Customer Data Quality Metrics: {dq_metrics}"
     )
@@ -166,12 +193,12 @@ try:
             f"exceeds allowed {MAX_REJECTION_PERCENTAGE}%"
         )
 
-    # Write valid customers to S3 as Parquet
+    # Write valid customers as Parquet
     valid_df.write.mode("overwrite").parquet(
         curated_path
     )
 
-    # Write rejected customers to S3 as Parquet
+    # Write rejected customers as Parquet
     rejected_df.write.mode("overwrite").parquet(
         rejected_path
     )
@@ -199,16 +226,16 @@ try:
         "error_message": None,
     }
 
-    # Write success audit to S3
-    write_audit_log(
+    # Write success audit to the configured destination
+    audit_location = write_audit_log(
         AUDIT_BUCKET,
         AUDIT_KEY,
         audit_data,
     )
 
+    # Log the actual audit destination
     logger.info(
-        f"ETL success audit written to "
-        f"s3://{AUDIT_BUCKET}/{AUDIT_KEY}"
+        f"ETL success audit written to {audit_location}"
     )
 
 
@@ -261,15 +288,15 @@ except Exception as error:
     # Attempt to write failure audit
     try:
 
-        write_audit_log(
+        audit_location = write_audit_log(
             AUDIT_BUCKET,
             AUDIT_KEY,
             failure_audit_data,
         )
 
+        # Log the actual audit destination
         logger.info(
-            f"ETL failure audit written to "
-            f"s3://{AUDIT_BUCKET}/{AUDIT_KEY}"
+            f"ETL failure audit written to {audit_location}"
         )
 
     except Exception as audit_error:
