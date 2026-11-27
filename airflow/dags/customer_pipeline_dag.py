@@ -29,11 +29,13 @@ if not DATA_BUCKET:
 
 def start_pipeline_from_lambda(bucket, key, **context):
     """Invoke the same Lambda used by S3 ObjectCreated notifications."""
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    etag = s3.head_object(Bucket=bucket, Key=key).get("ETag", "").strip('"')
     client = boto3.client("lambda", region_name=AWS_REGION)
     response = client.invoke(
         FunctionName=TRIGGER_LAMBDA,
         InvocationType="RequestResponse",
-        Payload=json.dumps({"bucket": bucket, "key": key}).encode("utf-8"),
+        Payload=json.dumps({"bucket": bucket, "key": key, "etag": etag}).encode("utf-8"),
     )
     result = json.loads(response["Payload"].read().decode("utf-8"))
     if response.get("FunctionError"):
