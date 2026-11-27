@@ -1,0 +1,2 @@
+# Keep this provider version compatible with the Airflow 2.10.x image.
+apache-airflow-providers-amazon==9.2.0
