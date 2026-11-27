@@ -68,11 +68,25 @@ def lambda_handler(event, context):
             raise
         existing = table.get_item(Key={"object_id": object_id}).get("Item", {})
         if existing.get("job_run_id"):
-            return {
-                "status": existing.get("status", "STARTED"),
-                "job_run_id": existing["job_run_id"],
-                "duplicate": True,
-            }
+            previous_run = glue.get_job_run(
+                JobName=job_name,
+                RunId=existing["job_run_id"],
+                PredecessorsIncluded=False,
+            )["JobRun"]
+            previous_state = previous_run["JobRunState"]
+            if previous_state not in {"FAILED", "TIMEOUT", "ERROR", "STOPPED", "EXPIRED"}:
+                return {
+                    "status": existing.get("status", "STARTED"),
+                    "job_run_id": existing["job_run_id"],
+                    "duplicate": True,
+                }
+            # A terminal failed Glue run may be retried for this same object.
+            table.update_item(
+                Key={"object_id": object_id},
+                UpdateExpression="SET #s = :starting, created_at = :now REMOVE job_run_id",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":starting": "STARTING", ":now": now},
+            )
         if existing.get("status") == "START_FAILED":
             # A previous start attempt failed before receiving a Glue JobRunId.
             # Reclaim the same object key so a later S3/Airflow retry can recover.
