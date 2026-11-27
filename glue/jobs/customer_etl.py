@@ -17,47 +17,7 @@ from glue.libraries.transformations import (
 )
 
 
-# --------------------------------------------------
-# 1. Function to write audit records
-# --------------------------------------------------
-
-def write_audit_log(
-    bucket_name: str,
-    audit_key: str,
-    audit_data: dict,
-) -> str:
-
-    # Check whether local audit mode is enabled
-    local_audit_dir = os.getenv("COADP_LOCAL_AUDIT_DIR")
-
-    if local_audit_dir:
-
-        # Write audit JSON locally during Docker testing
-        audit_file = Path(local_audit_dir) / audit_key
-
-        audit_file.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        audit_file.write_text(
-            json.dumps(audit_data, indent=2),
-            encoding="utf-8",
-        )
-
-        return str(audit_file)
-
-    # Write audit JSON to S3 during AWS Glue execution
-    s3_client = boto3.client("s3")
-
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key=audit_key,
-        Body=json.dumps(audit_data).encode("utf-8"),
-        ContentType="application/json",
-    )
-
-    return f"s3://{bucket_name}/{audit_key}"
+from glue.libraries.audit import write_audit_log
 
 
 # --------------------------------------------------
