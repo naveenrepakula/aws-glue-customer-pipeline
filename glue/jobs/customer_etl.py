@@ -72,6 +72,7 @@ args = getResolvedOptions(
         "curated_path",
         "rejected_path",
         "max_rejection_percentage",
+        "audit_bucket",
     ],
 )
 
@@ -84,7 +85,7 @@ rejected_path = args["rejected_path"]
 # 3. Configure audit location
 # --------------------------------------------------
 
-AUDIT_BUCKET = "customer-pipeline-dev-439701543859-data"
+AUDIT_BUCKET = args["audit_bucket"]
 
 audit_timestamp = datetime.now(timezone.utc).strftime(
     "%Y%m%dT%H%M%S%fZ"
