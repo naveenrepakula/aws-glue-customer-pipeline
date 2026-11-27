@@ -35,12 +35,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyspark==3.5.6 pytest boto3
+          pip install pyspark==3.5.6 pytest boto3 cfn-lint
 
       - name: Run unit tests
         run: |
           python -m pytest tests/unit tests/integration -v
           python -m compileall -q airflow/dags lambda/trigger_glue
+          python -m json.tool infrastructure/parameters/dev.json > /dev/null
+          cfn-lint -t infrastructure/template.yaml
 
   deploy-dev:
     name: Deploy AWS Glue DEV
