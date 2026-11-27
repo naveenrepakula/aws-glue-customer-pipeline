@@ -40,3 +40,11 @@ def test_dag_has_daily_schedule_and_retries():
     assert '"retries": 2' in source
     assert 'schedule="0 1 * * *"' in source
     assert "catchup=False" in source
+
+
+def test_glue_failure_has_bounded_lambda_retry():
+    source = DAG_SOURCE.read_text(encoding="utf-8")
+    assert 'retry_count >= 2' in source
+    assert 'previous' not in source  # Glue state is checked before retry by Lambda.
+    assert 'FunctionName=TRIGGER_LAMBDA' in source
+    assert 'glue_retry_count' in source
