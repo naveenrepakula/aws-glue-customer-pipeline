@@ -9,7 +9,7 @@
   },
   {
     "ParameterKey": "LambdaArtifactBucket",
-    "ParameterValue": "customer-pipeline-dev-439701543859-lambda-artifacts"
+    "ParameterValue": "customer-pipeline-dev-439701543859-glue-artifacts"
   },
   {
     "ParameterKey": "LambdaArtifactKey",
