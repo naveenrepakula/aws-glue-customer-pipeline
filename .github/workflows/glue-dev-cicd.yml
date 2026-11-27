@@ -40,7 +40,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/unit/test_transformations.py -v
+          python -m pytest tests/unit -v
+          python -m compileall -q airflow/dags
 
   deploy-dev:
     name: Deploy AWS Glue DEV
