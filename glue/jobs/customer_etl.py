@@ -122,12 +122,12 @@ try:
         rejected_path
     )
 
-    # Commit the Glue job after successful writes
-    job.commit()
-
-    # Prepare successful execution audit
+    # Prepare successful execution audit before committing job bookmarks
     audit_data = {
         "job_name": args["JOB_NAME"],
+        "input_path": input_path,
+        "curated_path": curated_path,
+        "rejected_path": rejected_path,
         "execution_timestamp": datetime.now(
             timezone.utc
         ).isoformat(),
@@ -156,6 +156,9 @@ try:
     logger.info(
         f"ETL success audit written to {audit_location}"
     )
+
+    # Commit Glue bookmarks only after outputs and success audit are durable.
+    job.commit()
 
 
 # --------------------------------------------------
