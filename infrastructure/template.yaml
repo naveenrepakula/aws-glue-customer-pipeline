@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Customer pipeline storage, event-driven Lambda trigger, Glue Catalog and Athena discovery
+Description: Customer pipeline Lambda trigger, Glue Catalog and Athena discovery using existing S3 buckets
 
 Parameters:
   ProjectName:
@@ -8,9 +8,12 @@ Parameters:
   Environment:
     Type: String
     AllowedValues: [dev, test, prod]
+  CustomerDataBucketName:
+    Type: String
+    Description: Existing S3 bucket for raw, curated, rejected and Athena result data
   LambdaArtifactBucket:
     Type: String
-    Description: Existing dedicated S3 bucket for Lambda deployment ZIP files
+    Description: Existing S3 bucket containing the Lambda deployment ZIP file
   LambdaArtifactKey:
     Type: String
     Default: lambda/trigger_glue.zip
@@ -28,37 +31,6 @@ Parameters:
     Default: athena-results/
 
 Resources:
-  CustomerDataBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub '${ProjectName}-${Environment}-${AWS::AccountId}-data'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        RestrictPublicBuckets: true
-      NotificationConfiguration:
-        EventBridgeConfiguration:
-          EventBridgeEnabled: true
-
-  GlueArtifactsBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub '${ProjectName}-${Environment}-${AWS::AccountId}-glue-artifacts'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        RestrictPublicBuckets: true
-
   CustomerPipelineCatalog:
     Type: AWS::Glue::Database
     Properties:
@@ -138,7 +110,7 @@ Resources:
         detail-type: [Object Created]
         detail:
           bucket:
-            name: [!Ref CustomerDataBucket]
+            name: [!Ref CustomerDataBucketName]
           object:
             key:
               - prefix: raw/customers/
@@ -173,12 +145,12 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: [s3:ListBucket]
-                Resource: !GetAtt CustomerDataBucket.Arn
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${CustomerDataBucketName}'
               - Effect: Allow
                 Action: [s3:GetObject]
                 Resource:
-                  - !Sub '${CustomerDataBucket.Arn}/curated/customers/*'
-                  - !Sub '${CustomerDataBucket.Arn}/rejected/customers/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CustomerDataBucketName}/curated/customers/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CustomerDataBucketName}/rejected/customers/*'
 
   CustomerPipelineCrawler:
     Type: AWS::Glue::Crawler
@@ -188,8 +160,8 @@ Resources:
       DatabaseName: !Ref CustomerPipelineCatalog
       Targets:
         S3Targets:
-          - Path: !Sub 's3://${CustomerDataBucket}/curated/customers/'
-          - Path: !Sub 's3://${CustomerDataBucket}/rejected/customers/'
+          - Path: !Sub 's3://${CustomerDataBucketName}/curated/customers/'
+          - Path: !Sub 's3://${CustomerDataBucketName}/rejected/customers/'
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: DEPRECATE_IN_DATABASE
@@ -204,13 +176,15 @@ Resources:
         EnforceWorkGroupConfiguration: true
         PublishCloudWatchMetricsEnabled: true
         ResultConfiguration:
-          OutputLocation: !Sub 's3://${CustomerDataBucket}/${AthenaResultsPrefix}'
+          OutputLocation: !Sub 's3://${CustomerDataBucketName}/${AthenaResultsPrefix}'
 
 Outputs:
   CustomerDataBucketName:
-    Value: !Ref CustomerDataBucket
+    Description: Existing customer pipeline data bucket
+    Value: !Ref CustomerDataBucketName
   GlueArtifactsBucketName:
-    Value: !Ref GlueArtifactsBucket
+    Description: Existing bucket containing Lambda deployment artifacts
+    Value: !Ref LambdaArtifactBucket
   CustomerTriggerLambdaName:
     Value: !Ref CustomerTriggerLambda
   CustomerIdempotencyTable:
