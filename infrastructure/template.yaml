@@ -20,7 +20,7 @@ Parameters:
     Description: Existing AWS Glue ETL job name
   MaxRejectionPercentage:
     Type: Number
-    Default: 20
+    Default: 30
     MinValue: 0
     MaxValue: 100
   AthenaResultsPrefix:
