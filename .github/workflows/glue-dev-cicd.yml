@@ -43,6 +43,8 @@ jobs:
           python -m compileall -q airflow/dags lambda/trigger_glue
           python -m json.tool infrastructure/parameters/dev.json > /dev/null
           cfn-lint -t infrastructure/template.yaml
+          cp .env.example .env
+          docker compose config --quiet
 
   deploy-dev:
     name: Deploy AWS Glue DEV
