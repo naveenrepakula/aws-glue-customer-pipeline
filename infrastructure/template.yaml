@@ -8,9 +8,6 @@ Parameters:
   Environment:
     Type: String
     AllowedValues: [dev, test, prod]
-  LambdaArtifactBucket:
-    Type: String
-    Description: Existing deployment artifact bucket containing the Lambda ZIP
   LambdaArtifactKey:
     Type: String
     Default: lambda/trigger_glue.zip
@@ -118,7 +115,7 @@ Resources:
       Timeout: 60
       MemorySize: 256
       Code:
-        S3Bucket: !Ref LambdaArtifactBucket
+        S3Bucket: !Ref GlueArtifactsBucket
         S3Key: !Ref LambdaArtifactKey
       Environment:
         Variables:
