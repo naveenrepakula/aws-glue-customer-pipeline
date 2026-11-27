@@ -1,61 +1,82 @@
-# Local Apache Airflow orchestration
+# Airflow scheduling and AWS pipeline operations
 
-This setup runs Apache Airflow locally with Docker Compose. Airflow orchestrates
-the existing AWS Glue job; it does not reimplement the PySpark transformations.
-No AWS resources are created by Docker Compose.
-
-## Architecture
+This repository keeps the requested architecture unchanged:
 
 ```text
-S3 raw/customers/customers.csv
-          |
-          v
-Airflow S3KeySensor
-          |
-          v
-Airflow GlueJobOperator
-          |
-          v
-AWS Glue: COADP-Customer-ETL-DEV
-          |
-          +--------------------------+
-          |                          |
-          v                          v
-S3 curated/customers/          S3 rejected/customers/
-          |
-          v
-Glue job audit record
+Source customer CSV
+       |
+       v
+Amazon S3 - Raw
+       |
+       | Object Created (EventBridge)
+       v
+AWS Lambda
+       |  starts Glue once per S3 object version
+       v
+AWS Glue + PySpark
+       |                         |
+       v                         v
+Curated S3                 Rejected S3
+Valid Parquet              Invalid records + reasons
+       |
+       v
+Glue Data Catalog / Crawler
+       |
+       v
+Amazon Athena
+
+Apache Airflow - daily schedule, Lambda invocation, Glue monitoring,
+                  crawler refresh, retries and operational visibility
+GitHub Actions - unit/contract tests and source validation on every push/PR
 ```
 
-The DAG runs daily at 01:00 Asia/Kolkata. By default it waits for the date-specific
-source object `raw/customers/customers_{{ ds_nodash }}.csv`, starts the Glue job,
-waits for completion, and retries failed tasks twice with a five-minute delay.
-Each logical run writes to a `run_date={{ ds }}` output prefix. The S3 key can
-be overridden in `.env`; retain a date template if each schedule should process
-a distinct daily file.
+**Trigger behavior:** S3 ObjectCreated events invoke Lambda directly through
+EventBridge. Airflow is a separate scheduled control plane: it checks the
+scheduled source key, invokes the same Lambda, waits for the returned Glue
+JobRunId to finish, and refreshes the Catalog crawler. DynamoDB idempotency
+uses bucket + key + ETag so the S3 event and scheduled Airflow run do not
+normally start two Glue runs for the same object version.
 
-## Prerequisites
+## Components added
 
-- Docker Desktop with Docker Compose
-- An AWS identity that can read the source S3 object and start, inspect, and
-  read the status of the configured Glue job
-- The Glue job already deployed in the target AWS account and region
-- Access to the AWS credentials/profile used by the Docker container
+- `lambda/trigger_glue/handler.py`: accepts S3 EventBridge events and
+  Airflow invocations, filters the raw customer CSV prefix, records an
+  idempotency key, and starts the existing Glue job.
+- `infrastructure/template.yaml`: provisions EventBridge routing, Lambda
+  execution role/function, DynamoDB idempotency table, Glue database/crawler,
+  Athena workgroup and S3 buckets.
+- `airflow/dags/customer_pipeline_dag.py`: scheduled sensor -> Lambda ->
+  Glue completion sensor -> Catalog crawler workflow.
+- `tests/unit/test_lambda_trigger.py`: offline Lambda event, Glue arguments,
+  duplicate-event and ignore-prefix tests.
+- `tests/unit/test_airflow_dag_contract.py`: verifies the intended DAG flow
+  and schedule without importing Airflow or calling AWS.
 
-## 1. Configure environment
+## Local Airflow prerequisites
 
-Copy `.env.example` to `.env` and set:
-- `CUSTOMER_DATA_BUCKET`: your actual data bucket name (do not include s3://)
-- `CUSTOMER_INPUT_KEY`: exact incoming object key
-- `CUSTOMER_GLUE_JOB_NAME`: existing Glue job name
-- `AWS_PROFILE` and `AWS_DEFAULT_REGION`
+- Docker Desktop and Docker Compose
+- Python 3.11 for local test execution
+- AWS CLI configured with a profile or IAM Identity Center session
+- AWS infrastructure deployed in the selected account/region
+- Existing Glue ETL job and its execution role configured for raw reads,
+  curated/rejected writes, and audit writes
 
-The Compose file mounts the host `~/.aws` directory read-only. Configure
-credentials on the host first (for example, using AWS IAM Identity Center /
-AWS SSO), and ensure the selected profile is available inside the container.
-Do not commit `.env`, access keys, secret keys, or AWS credential files.
+## 1. Configure local settings
 
-## 2. Start Airflow
+Copy `.env.example` to `.env`. Set your actual bucket, input key, Lambda name,
+Glue job, crawler, AWS profile and region. The default key is date-based:
+
+`raw/customers/customers_{{ ds_nodash }}.csv`
+
+Place the matching daily file in the raw S3 prefix. Do not commit `.env`,
+AWS access keys, secret keys, or credential files.
+
+The Compose stack mounts the host AWS config read-only. Configure the selected
+profile on the host first. The Airflow AWS connection is supplied through
+`AIRFLOW_CONN_AWS_GLUE_CONN` and the DAG uses that connection via
+`AwsBaseHook`; no static AWS keys are embedded in the DAG.
+
+## 2. Start local Airflow
 
 ```bash
 docker compose up airflow-init
@@ -63,67 +84,109 @@ docker compose up -d
 docker compose ps
 ```
 
-Open http://localhost:8080 and sign in with the local development account:
+Open http://localhost:8080. The local-only development login is:
 - Username: `admin`
 - Password: `admin`
 
-Change this development password if you expose the service beyond localhost.
-Do not use these credentials in a shared or production environment.
+Do not expose this development login publicly. Use a proper authentication
+backend and secrets manager for shared/production Airflow.
 
-## 3. Airflow AWS connection
+## 3. Configure AWS permissions
 
-Docker Compose provisions the `aws_glue_conn` connection automatically using
-the `AIRFLOW_CONN_AWS_GLUE_CONN` environment variable. It contains only the
-AWS region; it deliberately contains no static access keys or secret keys.
-The AWS provider uses the mounted host profile / default boto3 credential
-chain. The DAG reads the connection ID from `AIRFLOW_AWS_CONN_ID`.
+The Airflow identity needs scoped permissions:
+- `s3:ListBucket` on the data bucket and `s3:GetObject` on the raw customer
+  input prefix (for the sensor and ETag lookup)
+- `lambda:InvokeFunction` on the customer trigger Lambda
+- `glue:GetJobRun` on the customer Glue job
+- `glue:StartCrawler` and `glue:GetCrawler` on the customer crawler
 
-To use a different connection ID, update `AIRFLOW_AWS_CONN_ID` and the matching
-`AIRFLOW_CONN_<CONNECTION_ID>` environment variable in `docker-compose.yaml`,
-then recreate the Airflow containers.
+The Lambda execution role is separate. The CloudFormation template grants it:
+- `glue:StartJobRun` on the configured Glue job
+- DynamoDB GetItem/PutItem/UpdateItem on the idempotency table
+- CloudWatch Logs write permissions
 
-The AWS identity must have, at minimum, permission to:
-- `s3:GetObject` and `s3:ListBucket` for the configured raw input
-- `glue:StartJobRun`, `glue:GetJobRun`, and `glue:GetJobRuns` for the job
-- Any additional permissions the Glue job's own execution role needs for
-  its data, artifacts, and audit destinations
+The Glue job execution role must independently be able to read raw S3,
+write curated/rejected Parquet and write audit JSON to the configured data
+bucket. The crawler role needs read access to curated/rejected prefixes.
+Athena users need Catalog read/query permissions and access to the workgroup
+results location. Keep these identities separate; do not grant broad S3
+delete permissions to Airflow or Lambda.
 
-Airflow's AWS identity and the Glue job execution role are separate identities.
-Do not give the Airflow identity broad S3 write/delete access just to start Glue.
+## 4. Deploy AWS infrastructure
 
-## 4. Enable and run the DAG
+The CloudFormation template now includes the Lambda, EventBridge rule,
+DynamoDB table, Glue database/crawler and Athena workgroup. The Lambda ZIP
+must be uploaded to the Glue artifacts bucket before the stack creates or
+updates the Lambda function.
 
-In the Airflow UI:
-1. Find `customer_s3_to_glue_pipeline`.
-2. Unpause it.
-3. Use **Trigger DAG** to start a manual run.
-
-The S3 sensor waits until the configured object exists. Once detected, the
-Glue task starts the named job and waits for the job run to finish. Review
-task logs in Airflow and the corresponding Glue / CloudWatch logs for details.
-
-## 5. Local validation without AWS
-
-You can validate DAG syntax without connecting to AWS after installing the
-same Airflow and Amazon provider versions:
+Build the Lambda package from the repository root:
 
 ```bash
-python -m compileall airflow/dags
+mkdir -p dist
+python - <<'PY'
+from zipfile import ZipFile, ZIP_DEFLATED
+with ZipFile("dist/trigger_glue.zip", "w", ZIP_DEFLATED) as archive:
+    archive.write("lambda/trigger_glue/handler.py", "handler.py")
+PY
 ```
 
-A successful compile only verifies Python syntax. To test real task execution,
-an AWS account, valid IAM permissions, the source object, and the deployed
-Glue job are required.
+For an existing deployment, upload the package to the artifacts bucket and
+update the CloudFormation stack with the matching `LambdaArtifactKey`
+parameter. On a brand-new account, bootstrap the artifacts bucket first,
+upload the ZIP, then deploy the full stack. Use the DEV parameter file and
+the correct account/region for your environment. Do not deploy to PROD while
+the project is still being validated.
 
-## Operational notes
+The Glue job name parameter must match an already deployed Glue job. The
+template does not create or replace the existing ETL job.
 
-- The DAG is a local orchestration example, not a production Airflow deployment.
-  For production, use managed Airflow or a secured Airflow deployment with
-  managed metadata storage, secrets backend, networking, monitoring, and RBAC.
-- The sensor watches one configured object key. If source files are delivered
-  with unique names, change the input-key strategy (for example, a date-based
-  key or manifest) before enabling the schedule.
-- The Glue job must accept the arguments supplied by this DAG. The repository's
-  DEV job definition includes the rejection threshold argument.
-- Re-running the same logical date writes to the same date-specific prefixes.
-  Confirm the Glue write mode and rerun policy before using production data.
+## 5. Run the scheduled DAG
+
+The DAG `customer_s3_lambda_glue_pipeline` runs daily at 01:00
+Asia/Kolkata. It:
+1. Waits up to one hour for the date-specific raw CSV.
+2. Invokes the Lambda with bucket, key and object ETag.
+3. Waits for that exact Glue JobRunId and fails if Glue reports a terminal
+   failure.
+4. Starts the Glue crawler after Glue succeeds.
+5. Retries failed Airflow tasks twice, with a five-minute delay.
+
+Unpause the DAG in the Airflow UI. For a manual test, ensure the matching
+date-keyed input file exists, then select **Trigger DAG**. S3 event delivery
+may start Lambda before Airflow; the shared DynamoDB idempotency key lets
+Airflow reuse the existing Glue run rather than starting a second one.
+
+## 6. Run offline tests on every code change
+
+GitHub Actions runs on pushes to feature branches and on pull requests to
+main. It runs the PySpark transformation tests, Lambda trigger tests, Airflow
+DAG contract tests and Python compilation. These tests do not require AWS.
+
+Run the same tests locally:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install pyspark==3.5.6 pytest boto3
+python -m pytest tests/unit -v
+python -m compileall -q airflow/dags lambda/trigger_glue
+```
+
+These are local/offline checks. They do not prove that AWS IAM, EventBridge,
+Lambda, Glue, S3, the crawler or Athena is correctly configured. Validate
+those integrations in DEV only after the AWS stack and job are deployed.
+
+## Operational cautions
+
+- The Lambda idempotency record is keyed by bucket/key/ETag and expires after
+  30 days. Re-uploading the same key with a different ETag is a new object
+  version and starts a new run.
+- The Glue ETL currently writes with overwrite mode. Use unique run-date
+  output prefixes and confirm rerun behavior before production use.
+- Airflow retries a failed task; it does not blindly retry a Glue run that
+  has already reached a terminal failed state. Investigate the Glue error,
+  correct the cause, and trigger a controlled rerun.
+- The crawler runs only after a successful Glue run. Athena tables become
+  queryable after the crawler completes.
+- The local Docker Compose Airflow stack is for development, not a secured
+  production scheduler. Production requires managed secrets, authentication,
+  RBAC, monitoring, backup, network controls and deployment automation.
