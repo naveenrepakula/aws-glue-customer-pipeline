@@ -85,7 +85,12 @@ def lambda_handler(event, context):
                 Key={"object_id": object_id},
                 UpdateExpression="SET #s = :starting, created_at = :now REMOVE job_run_id",
                 ExpressionAttributeNames={"#s": "status"},
-                ExpressionAttributeValues={":starting": "STARTING", ":now": now},
+                ExpressionAttributeValues={
+                    ":starting": "STARTING",
+                    ":now": now,
+                    ":previous_run_id": existing["job_run_id"],
+                },
+                ConditionExpression="job_run_id = :previous_run_id",
             )
         elif existing.get("status") == "START_FAILED":
             # A previous start attempt failed before receiving a Glue JobRunId.
@@ -94,7 +99,12 @@ def lambda_handler(event, context):
                 Key={"object_id": object_id},
                 UpdateExpression="SET #s = :starting, created_at = :now",
                 ExpressionAttributeNames={"#s": "status"},
-                ExpressionAttributeValues={":starting": "STARTING", ":now": now},
+                ExpressionAttributeValues={
+                    ":starting": "STARTING",
+                    ":now": now,
+                    ":failed": "START_FAILED",
+                },
+                ConditionExpression="#s = :failed",
             )
         else:
             raise RuntimeError("A concurrent invocation is already starting this Glue run; retry shortly")
