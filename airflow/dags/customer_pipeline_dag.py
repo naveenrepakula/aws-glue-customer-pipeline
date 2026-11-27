@@ -12,6 +12,7 @@ import boto3
 import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator, PythonSensor
+from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.amazon.aws.operators.glue_crawler import GlueCrawlerOperator
 
@@ -29,9 +30,13 @@ if not DATA_BUCKET:
 
 def start_pipeline_from_lambda(bucket, key, **context):
     """Invoke the same Lambda used by S3 ObjectCreated notifications."""
-    s3 = boto3.client("s3", region_name=AWS_REGION)
+    s3 = AwsBaseHook(
+        aws_conn_id=AWS_CONN_ID, client_type="s3", region_name=AWS_REGION
+    ).get_conn()
     etag = s3.head_object(Bucket=bucket, Key=key).get("ETag", "").strip('"')
-    client = boto3.client("lambda", region_name=AWS_REGION)
+    client = AwsBaseHook(
+        aws_conn_id=AWS_CONN_ID, client_type="lambda", region_name=AWS_REGION
+    ).get_conn()
     response = client.invoke(
         FunctionName=TRIGGER_LAMBDA,
         InvocationType="RequestResponse",
@@ -52,7 +57,9 @@ def glue_run_finished(job_name, **context):
     run_id = ti.xcom_pull(task_ids="invoke_customer_lambda", key="glue_job_run_id")
     if not run_id:
         raise RuntimeError("Missing Glue JobRunId from Lambda invocation")
-    client = boto3.client("glue", region_name=AWS_REGION)
+    client = AwsBaseHook(
+        aws_conn_id=AWS_CONN_ID, client_type="glue", region_name=AWS_REGION
+    ).get_conn()
     run = client.get_job_run(
         JobName=job_name, RunId=run_id, PredecessorsIncluded=False
     )["JobRun"]
