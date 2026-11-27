@@ -115,11 +115,11 @@ delete permissions to Airflow or Lambda.
 ## 4. Deploy AWS infrastructure
 
 The CloudFormation template now includes the Lambda, EventBridge rule,
-DynamoDB table, Glue database/crawler and Athena workgroup. The Lambda ZIP
-must be uploaded to the Glue artifacts bucket before the stack creates or
-updates the Lambda function.
+DynamoDB table, Glue database/crawler and Athena workgroup. The Lambda ZIP must be uploaded to the existing DEV Glue artifacts bucket
+before the stack creates or updates the Lambda function. The DEV parameters
+use that same pre-existing bucket as `LambdaArtifactBucket`.
 
-Build the Lambda package from the repository root:
+Build and upload the package from the repository root:
 
 ```bash
 mkdir -p dist
@@ -128,14 +128,32 @@ from zipfile import ZipFile, ZIP_DEFLATED
 with ZipFile("dist/trigger_glue.zip", "w", ZIP_DEFLATED) as archive:
     archive.write("lambda/trigger_glue/handler.py", "handler.py")
 PY
+
+aws s3 cp dist/trigger_glue.zip \
+  s3://customer-pipeline-dev-439701543859-glue-artifacts/releases/current/trigger_glue.zip
 ```
 
-For an existing deployment, upload the package to the artifacts bucket and
-update the CloudFormation stack with the matching `LambdaArtifactKey`
-parameter. On a brand-new account, bootstrap the artifacts bucket first,
-upload the ZIP, then deploy the full stack. Use the DEV parameter file and
-the correct account/region for your environment. Do not deploy to PROD while
-the project is still being validated.
+Update the existing DEV CloudFormation stack (use the actual stack name in
+your account):
+
+```bash
+aws cloudformation deploy \
+  --template-file infrastructure/template.yaml \
+  --stack-name customer-pipeline-dev \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    Environment=dev \
+    ProjectName=customer-pipeline \
+    LambdaArtifactBucket=customer-pipeline-dev-439701543859-glue-artifacts \
+    LambdaArtifactKey=releases/current/trigger_glue.zip \
+    GlueJobName=COADP-Customer-ETL-DEV
+```
+
+The DEV bucket/account values above follow the repository's current DEV
+configuration; verify them against your AWS account before deployment. The
+existing stack must already own the data and Glue artifacts buckets. For a
+brand-new environment, bootstrap the buckets separately before this stack
+update. Do not deploy to PROD while the project is still being validated.
 
 The Glue job name parameter must match an already deployed Glue job. The
 template does not create or replace the existing ETL job.
