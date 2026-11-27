@@ -41,8 +41,9 @@ class FakeTable:
     def update_item(self, **kwargs):
         self.updates.append(kwargs)
         values = kwargs.get("ExpressionAttributeValues", {})
-        if self.item is not None and "REMOVE job_run_id" in kwargs.get("UpdateExpression", ""):
-            self.item.pop("job_run_id", None)
+        if self.item is not None:
+            if "REMOVE job_run_id" in kwargs.get("UpdateExpression", ""):
+                self.item.pop("job_run_id", None)
             if ":run_id" in values:
                 self.item["job_run_id"] = values[":run_id"]
             if ":started" in values:
