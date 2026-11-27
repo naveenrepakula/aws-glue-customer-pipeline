@@ -174,6 +174,9 @@ except Exception as error:
     # Prepare failed execution audit
     failure_audit_data = {
         "job_name": args["JOB_NAME"],
+        "input_path": input_path,
+        "curated_path": curated_path,
+        "rejected_path": rejected_path,
         "execution_timestamp": datetime.now(
             timezone.utc
         ).isoformat(),
