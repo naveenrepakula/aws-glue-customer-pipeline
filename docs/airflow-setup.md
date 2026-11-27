@@ -27,10 +27,12 @@ S3 curated/customers/          S3 rejected/customers/
 Glue job audit record
 ```
 
-The DAG runs daily at 01:00 Asia/Kolkata, waits for the configured source
-object, starts the Glue job, waits for its completion, and retries failed
-tasks twice with a five-minute delay. Each logical run writes to a
-`run_date={{ ds }}` output prefix to keep daily runs separate.
+The DAG runs daily at 01:00 Asia/Kolkata. By default it waits for the date-specific
+source object `raw/customers/customers_{{ ds_nodash }}.csv`, starts the Glue job,
+waits for completion, and retries failed tasks twice with a five-minute delay.
+Each logical run writes to a `run_date={{ ds }}` output prefix. The S3 key can
+be overridden in `.env`; retain a date template if each schedule should process
+a distinct daily file.
 
 ## Prerequisites
 
