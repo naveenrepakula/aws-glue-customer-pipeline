@@ -63,9 +63,11 @@ Install Python 3.11, Java 17, then run:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install pyspark==3.5.6 pytest boto3
+python -m pip install pyspark==3.5.6 pytest boto3 cfn-lint
 python -m pytest tests/unit -v
 python -m compileall -q airflow/dags lambda/trigger_glue
+python -m json.tool infrastructure/parameters/dev.json > /dev/null
+cfn-lint -t infrastructure/template.yaml
 ```
 
 GitHub Actions runs these checks for feature branch pushes and pull requests.
