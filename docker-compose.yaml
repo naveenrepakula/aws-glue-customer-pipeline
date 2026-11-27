@@ -29,12 +29,12 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
-      AIRFLOW_AWS_CONN_ID: ${AIRFLOW_AWS_CONN_ID:-aws_glue_conn}
+      AIRFLOW_AWS_CONN_ID: aws_glue_conn
       AIRFLOW_CONN_AWS_GLUE_CONN: "{\"conn_type\":\"aws\",\"extra\":{\"region_name\":\"${AWS_DEFAULT_REGION:-ap-south-1}\"}}"
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-south-1}
       AWS_PROFILE: ${AWS_PROFILE:-default}
       CUSTOMER_DATA_BUCKET: ${CUSTOMER_DATA_BUCKET:?Set CUSTOMER_DATA_BUCKET in .env}
-      CUSTOMER_INPUT_KEY: ${CUSTOMER_INPUT_KEY:-raw/customers/customers.csv}
+      CUSTOMER_INPUT_KEY: ${CUSTOMER_INPUT_KEY:-raw/customers/customers_{{ ds_nodash }}.csv}
       CUSTOMER_GLUE_JOB_NAME: ${CUSTOMER_GLUE_JOB_NAME:-COADP-Customer-ETL-DEV}
       CUSTOMER_TRIGGER_LAMBDA: ${CUSTOMER_TRIGGER_LAMBDA:-customer-pipeline-dev-trigger-glue}
       CUSTOMER_GLUE_CRAWLER_NAME: ${CUSTOMER_GLUE_CRAWLER_NAME:-customer-pipeline-dev-customer-crawler}
@@ -42,7 +42,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ${HOME}/.aws:/home/airflow/.aws:ro
+      - ${USERPROFILE:-${HOME:-.}}/.aws:/home/airflow/.aws:ro
     user: "${AIRFLOW_UID:-50000}:0"
     command: >
       bash -c "airflow db migrate &&
@@ -60,7 +60,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ${HOME}/.aws:/home/airflow/.aws:ro
+      - ${USERPROFILE:-${HOME:-.}}/.aws:/home/airflow/.aws:ro
     user: "${AIRFLOW_UID:-50000}:0"
     ports:
       - "8080:8080"
@@ -78,7 +78,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
-      - ${HOME}/.aws:/home/airflow/.aws:ro
+      - ${USERPROFILE:-${HOME:-.}}/.aws:/home/airflow/.aws:ro
     user: "${AIRFLOW_UID:-50000}:0"
     command: scheduler
     restart: unless-stopped

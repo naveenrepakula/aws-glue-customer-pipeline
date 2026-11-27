@@ -1,0 +1,27 @@
+
+{
+  "Name": "curated_customers",
+  "Description": "DEV curated customer data stored in Parquet",
+  "TableType": "EXTERNAL_TABLE",
+  "Parameters": {
+    "classification": "parquet",
+    "EXTERNAL": "TRUE"
+  },
+  "StorageDescriptor": {
+    "Columns": [
+      {"Name": "customer_id", "Type": "string"},
+      {"Name": "first_name", "Type": "string"},
+      {"Name": "last_name", "Type": "string"},
+      {"Name": "email", "Type": "string"},
+      {"Name": "phone", "Type": "string"},
+      {"Name": "country", "Type": "string"},
+      {"Name": "created_at", "Type": "date"}
+    ],
+    "Location": "s3://customer-pipeline-dev-439701543859-data/curated/customers/dev-test/",
+    "InputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat",
+    "OutputFormat": "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat",
+    "SerdeInfo": {
+      "SerializationLibrary": "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+    }
+  }
+}

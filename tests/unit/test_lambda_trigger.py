@@ -89,6 +89,24 @@ def test_extracts_eventbridge_s3_event():
     }
 
 
+def test_extracts_s3_notification_record():
+    event = {
+        "Records": [
+            {
+                "s3": {
+                    "bucket": {"name": "customer-data"},
+                    "object": {"key": "raw/customers/customer+file.csv", "eTag": '"abc123"'},
+                }
+            }
+        ]
+    }
+    assert handler_module._extract_object(event) == {
+        "bucket": "customer-data",
+        "key": "raw/customers/customer file.csv",
+        "etag": "abc123",
+    }
+
+
 def test_starts_glue_with_expected_paths_and_audit_bucket(monkeypatch):
     table = FakeTable()
     glue = FakeGlue()
@@ -167,6 +185,32 @@ def test_failed_glue_run_can_be_restarted_for_same_object(monkeypatch):
         }
     )
     glue = FakeGlue(prior_state="FAILED")
+    monkeypatch.setattr(handler_module, "dynamodb", FakeDynamoDB(table))
+    monkeypatch.setattr(handler_module, "glue", glue)
+
+    result = handler_module.lambda_handler(
+        {
+            "bucket": "customer-data",
+            "key": "raw/customers/customers_20261127.csv",
+            "etag": "etag-001",
+        },
+        None,
+    )
+
+    assert result["status"] == "STARTED"
+    assert result["job_run_id"] == "jr_test_123"
+    assert result["duplicate"] is False
+    assert len(glue.calls) == 1
+
+
+def test_start_failed_idempotency_record_can_be_reclaimed(monkeypatch):
+    table = FakeTable(
+        {
+            "object_id": "customer-data/raw/customers/customers_20261127.csv#etag-001",
+            "status": "START_FAILED",
+        }
+    )
+    glue = FakeGlue()
     monkeypatch.setattr(handler_module, "dynamodb", FakeDynamoDB(table))
     monkeypatch.setattr(handler_module, "glue", glue)
 

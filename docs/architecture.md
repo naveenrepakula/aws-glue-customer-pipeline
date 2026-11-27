@@ -1,406 +1,104 @@
-# Customer Data Pipeline Architecture
+# AWS Glue Customer Pipeline Architecture
 
-## DEV S3 Storage
+## Processing and control flow
 
-The customer data pipeline uses two Amazon S3 buckets:
-
-1. Customer Data Bucket
-2. Glue Artifacts Bucket
-
-Both buckets are provisioned and managed using AWS CloudFormation.
-
----
-
-## S3 Storage Structure
+The data path is S3 Raw CSV → Lambda → the existing AWS Glue PySpark job →
+Curated and Rejected S3 prefixes → Glue Data Catalog → Athena.
 
 ```text
-Customer Data Bucket
-│
-├── raw/
-│   └── customers/
-│       └── Incoming customer source files
-│
-├── curated/
-│   └── customers/
-│       └── Validated and transformed customer data
-│
-└── rejected/
-    └── customers/
-        └── Records that fail data-quality validation
+S3 raw/customers/*.csv
+        │ S3 Object Created through EventBridge
+        ▼
+Trigger Lambda ── DynamoDB idempotency record (bucket/key/ETag)
+        │ StartJobRun
+        ▼
+COADP-Customer-ETL-DEV (existing job; not created by this template)
+        ├── s3://<data-bucket>/curated/customers/run_date=YYYYMMDD/
+        ├── s3://<data-bucket>/rejected/customers/run_date=YYYYMMDD/
+        └── s3://<data-bucket>/audit/customers/<job>/<timestamp>.json
+                    │
+                    ▼
+            Glue crawler and Data Catalog
+                    │
+                    ▼
+                  Athena
 
-
-Glue Artifacts Bucket
-│
-└── scripts/
-    └── AWS Glue ETL scripts
+Airflow (daily schedule) → S3 key sensor → invoke the same Lambda
+                         → monitor the returned Glue JobRunId
+                         → refresh the crawler after success
 ```
 
----
-
-## Customer Data Bucket
-
-The Customer Data Bucket stores customer data throughout the ETL lifecycle.
-
-### raw/customers/
-
-The `raw/customers/` prefix is the landing location for incoming customer source files.
-
-Example:
-
-```text
-raw/customers/customers_20261004.csv
-```
-
-Future pipeline components can configure an Amazon S3 `ObjectCreated` event for this prefix to start customer-data processing.
-
-Expected flow:
-
-```text
-Source System
-     |
-     v
-raw/customers/
-     |
-     v
-AWS Glue ETL
-```
-
----
-
-### curated/customers/
-
-The `curated/customers/` prefix stores customer records that successfully pass validation, cleaning, and transformation.
-
-AWS Glue will eventually write processed data to this location.
-
-Example:
-
-```text
-curated/customers/year=2026/month=10/day=04/part-00000.parquet
-```
-
-The curated layer is intended to contain analytics-ready customer data.
-
----
-
-### rejected/customers/
-
-The `rejected/customers/` prefix stores records that fail schema validation or data-quality checks.
-
-Examples of rejected records may include:
-
-- Missing required customer IDs
-- Invalid data types
-- Invalid email formats
-- Malformed records
-- Records that violate data-quality rules
-
-Example:
-
-```text
-rejected/customers/year=2026/month=10/day=04/rejected-records.json
-```
-
-Keeping rejected records separate from curated data prevents invalid records from reaching downstream analytics systems.
-
----
-
-## Glue Artifacts Bucket
-
-The Glue Artifacts Bucket stores deployment artifacts required by AWS Glue.
-
-### scripts/
-
-The `scripts/` prefix is used to store AWS Glue ETL scripts.
-
-Example:
-
-```text
-scripts/customer_etl.py
-```
-
-A deployed AWS Glue job can reference the script using an S3 location such as:
-
-```text
-s3://<glue-artifacts-bucket>/scripts/customer_etl.py
-```
-
----
-
-## Data Processing Flow
-
-The planned customer-data processing flow is:
-
-```text
-Source Systems
-      |
-      v
-raw/customers/
-      |
-      v
-AWS Glue / PySpark
-      |
-      | Validate
-      | Clean
-      | Transform
-      |
-      +-----------------------+
-      |                       |
-      v                       v
-Valid Records           Invalid Records
-      |                       |
-      v                       v
-curated/customers/      rejected/customers/
-```
-
-The `raw` layer preserves incoming source data.
-
-The `curated` layer contains successfully processed data.
-
-The `rejected` layer contains records that require investigation or remediation.
-
----
-
-## S3 Prefix Design
-
-Amazon S3 uses object keys rather than a traditional directory-based file system.
-
-Paths such as:
-
-```text
-raw/customers/
-curated/customers/
-rejected/customers/
-scripts/
-```
-
-are logical S3 object-key prefixes.
-
-These prefixes define where different pipeline components read and write data.
-
----
-
-## Security
-
-Both DEV S3 buckets are configured through AWS CloudFormation with server-side encryption and public-access protection.
-
-### Server-Side Encryption
-
-The buckets use Amazon S3 server-side encryption with AES-256.
-
-CloudFormation configuration:
-
-```yaml
-BucketEncryption:
-  ServerSideEncryptionConfiguration:
-    - ServerSideEncryptionByDefault:
-        SSEAlgorithm: AES256
-```
-
-### Public Access Protection
-
-The following S3 public-access controls are enabled:
-
-```text
-BlockPublicAcls       = true
-IgnorePublicAcls      = true
-BlockPublicPolicy     = true
-RestrictPublicBuckets = true
-```
-
-This prevents the pipeline buckets from being accidentally exposed publicly.
-
----
-
-## Infrastructure Management
-
-The DEV S3 infrastructure is provisioned using AWS CloudFormation.
-
-The infrastructure template is located at:
-
-```text
-infrastructure/template.yaml
-```
-
-DEV environment parameters are maintained in:
-
-```text
-infrastructure/parameters/dev.json
-```
-
-Infrastructure changes should be made through Infrastructure as Code rather than manually creating AWS resources.
-
----
-
-## Resource Naming Convention
-
-AWS resources follow the naming convention:
-
-```text
-<project-name>-<environment>-<aws-account-id>-<purpose>
-```
-
-Examples:
-
-```text
-customer-pipeline-dev-<account-id>-data
-customer-pipeline-dev-<account-id>-glue-artifacts
-```
-
-The AWS account ID is supplied dynamically by CloudFormation using the `AWS::AccountId` pseudo parameter.
-
-The environment is supplied using the CloudFormation `Environment` parameter.
-
-This approach allows the same CloudFormation template to be reused across environments such as:
-
-```text
-DEV
-TEST
-PROD
-```
-
----
-
-## DEV Infrastructure
-
-The current DEV architecture is:
-
-```text
-AWS Account
-│
-└── CloudFormation
-    │
-    └── customer-pipeline-dev
-        │
-        ├── CustomerDataBucket
-        │   │
-        │   ├── raw/customers/
-        │   ├── curated/customers/
-        │   └── rejected/customers/
-        │
-        └── GlueArtifactsBucket
-            │
-            └── scripts/
-```
-
----
-
-## Future Pipeline Integration
-
-Future tickets will extend this storage layer with processing and orchestration components.
-
-The planned high-level architecture is:
-
-```text
-Source Systems
-      |
-      v
-Amazon S3
-raw/customers/
-      |
-      | ObjectCreated Event
-      v
-AWS Lambda
-      |
-      | Start Glue Job
-      v
-AWS Glue / PySpark
-      |
-      +-----------------------+
-      |                       |
-      v                       v
-curated/customers/      rejected/customers/
-      |
-      v
-AWS Glue Data Catalog
-      |
-      v
-Amazon Athena
-```
-
-Additional monitoring and orchestration components can include Amazon CloudWatch and Apache Airflow.
-
-
----
-
-## Apache Airflow Orchestration
-
-The local Airflow deployment schedules and monitors the existing AWS Glue job.
-It does not duplicate the PySpark transformation logic.
-
-```text
-Amazon S3 raw/customers/
-          |
-          v
-Airflow S3KeySensor
-          |
-          v
-Airflow GlueJobOperator
-          |
-          v
-AWS Glue / PySpark
-          |
-          +-------------------------+
-          |                         |
-          v                         v
-S3 curated/customers/        S3 rejected/customers/
-```
-
-The DAG is located at `airflow/dags/customer_pipeline_dag.py`. It runs daily
-at 01:00 Asia/Kolkata, waits for the configured S3 object, starts the configured
-Glue job, waits for completion, and retries failed tasks twice.
-
-See [airflow-setup.md](airflow-setup.md) for local Docker Compose setup,
-AWS connection configuration, minimum permissions, and manual execution.
-
-
----
-
-## Implemented event-driven architecture and scheduled orchestration
-
-The intended architecture is preserved:
-
-```text
-Source customer CSV
-       |
-       v
-Amazon S3 - Raw
-       |
-       | ObjectCreated event through EventBridge
-       v
-AWS Lambda
-       |  DynamoDB idempotency check
-       |  StartJobRun
-       v
-AWS Glue + PySpark
-       |                         |
-       v                         v
-Curated S3                 Rejected S3
-Valid Parquet              Invalid records + reasons
-       |
-       v
-AWS Glue Data Catalog / Crawler
-       |
-       v
-Amazon Athena
-
-Apache Airflow - daily schedule, input sensor, Lambda invoke,
-                  Glue run monitoring, crawler refresh and retries
-GitHub Actions - automated offline tests for each code change
-```
-
-S3 EventBridge invokes Lambda on raw-prefix object creation. Lambda uses
-bucket + key + ETag as an idempotency key in DynamoDB before starting the
-existing Glue ETL job. Airflow is a separate scheduled control plane: it
-waits for the date-keyed input, invokes the same Lambda entry point, monitors
-the returned Glue JobRunId and refreshes the Glue crawler after success.
-The shared ETag key prevents the event-driven and scheduled triggers from
-normally starting duplicate Glue runs for the same object version.
-
-The CloudFormation template provisions the event routing, Lambda execution
-role/function, idempotency table, Glue Catalog database/crawler and Athena
-workgroup. The existing Glue job remains a separately deployed resource and
-must be named in the template parameters.
-
-See [airflow-setup.md](airflow-setup.md) for deployment prerequisites,
-permissions, local Airflow setup, test commands and known operational limits.
+S3 EventBridge delivery and Airflow are two trigger/control paths for the same
+job. Airflow remains the scheduled orchestration layer; it does not replace
+S3 event processing or carry transformation logic. Both paths provide the
+object ETag so DynamoDB can deduplicate the same object version.
+
+## AWS resources and ownership
+
+`infrastructure/template.yaml` creates the trigger Lambda and its execution
+role, DynamoDB idempotency table, EventBridge rule and invoke permission, Glue
+database and crawler, crawler role, and Athena workgroup. It takes existing
+data and artifact buckets as parameters. It does not create buckets or the
+Glue ETL job. Keep the job name `COADP-Customer-ETL-DEV` unless an explicitly
+approved migration changes that dependency. The unrelated
+`cdp-customer-pipeline-dev` Lambda is outside this repository's scope.
+
+The existing data bucket must have S3 EventBridge notifications enabled for
+the rule to receive object-created events. That bucket-level setting is not
+managed by this template: changing a bucket's notification configuration can
+replace other notification destinations. Review and preserve the full
+existing configuration when enabling it.
+
+## Identity and permissions
+
+- **Trigger Lambda role:** CloudWatch Logs writes, `glue:StartJobRun` and
+  `glue:GetJobRun` on the configured Glue job, and Get/Put/Update on only the
+  idempotency table.
+- **Airflow identity:** S3 list/head access for the raw input, invoke access
+  for the trigger Lambda, Glue GetJobRun, and crawler start/status access.
+- **Glue job execution role:** read raw CSV and Glue script/library artifacts;
+  write curated, rejected, and audit objects. The checked-in sample policy
+  only includes the older `glue/*` artifact path; a job using
+  `releases/<revision>/*` needs matching read access.
+- **Crawler role:** list the data bucket and read curated/rejected prefixes.
+- **Athena caller:** Glue Catalog read and Athena query permissions, plus S3
+  access to the workgroup result prefix. Creating an Athena workgroup does not
+  grant those permissions or guarantee its result bucket policy.
+
+Use separate roles and narrow resource scopes. In particular, Lambda does not
+need broad S3 access, and Airflow does not need Glue job start permission
+because it invokes Lambda.
+
+## Idempotency and output behavior
+
+The Lambda's conditional DynamoDB put claims `bucket/key#etag`; existing
+records with a Glue run ID return that run unless it ended in a terminal
+failure. Failed runs can be started again for the same object. A record left
+in `STARTING` without a run ID has no lease recovery today, and a timeout in
+the Glue start response can leave uncertainty about whether a run started.
+This is deduplication with bounded retry behavior, not a strict exactly-once
+guarantee. DynamoDB TTL cleanup is asynchronous.
+
+The output date is parsed from a `customers_YYYYMMDD.csv` filename. Other raw
+CSV names use the current UTC date. Glue writes in overwrite mode, so separate
+objects mapping to the same date share output locations and can overwrite one
+another. Confirm the naming and rerun policy before enabling production
+ingestion.
+
+The crawler targets curated and rejected prefixes and updates the configured
+database. Airflow refreshes it after its monitored Glue run succeeds. A
+standalone EventBridge-triggered run does not currently start the crawler, so
+catalog freshness for event-only runs depends on a later scheduled crawler
+refresh or an operational refresh.
+
+## Local checks and deployment boundary
+
+Unit and local integration tests use mocked AWS clients or local Spark. They
+do not verify live IAM, S3 EventBridge delivery, Glue behavior, crawler table
+discovery, or Athena query access. Review `COADP-3-deployment.md` and
+`airflow-setup.md` before a separately approved deployment. CI runs validation
+only and does not upload artifacts, update AWS resources, or start Glue.
+
+No AWS deployment, Lambda invocation, data upload, or Glue run is part of
+local development validation. Perform those actions only after explicit
+approval and a reviewed deployment plan.
