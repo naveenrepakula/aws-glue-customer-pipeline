@@ -1,0 +1,2 @@
+# Amazon provider for the Airflow 2.10.5 base image
+apache-airflow-providers-amazon==9.2.0

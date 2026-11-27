@@ -9,6 +9,7 @@ from glue.libraries.transformations import (
     split_valid_rejected,
     transform_customer_data,
     calculate_data_quality_metrics,
+    validate_data_quality,
 )
 
 
@@ -483,3 +484,41 @@ def test_reconciliation_failure():
 
     # ASSERT
     assert actual_metrics == expected_metrics
+
+def test_data_quality_gate_passes_at_configured_threshold():
+    metrics = {
+        "source_records": 7,
+        "valid_records": 5,
+        "rejected_records": 2,
+        "rejection_percentage": 28.57,
+        "reconciliation_status": "PASSED",
+    }
+    validate_data_quality(metrics, 30)
+
+
+def test_data_quality_gate_fails_when_rejection_threshold_exceeded():
+    import pytest
+
+    metrics = {
+        "source_records": 7,
+        "valid_records": 5,
+        "rejected_records": 2,
+        "rejection_percentage": 28.57,
+        "reconciliation_status": "PASSED",
+    }
+    with pytest.raises(ValueError, match="exceeds allowed"):
+        validate_data_quality(metrics, 20)
+
+
+def test_data_quality_gate_fails_when_reconciliation_fails():
+    import pytest
+
+    metrics = {
+        "source_records": 7,
+        "valid_records": 5,
+        "rejected_records": 1,
+        "rejection_percentage": 14.29,
+        "reconciliation_status": "FAILED",
+    }
+    with pytest.raises(ValueError, match="do not reconcile"):
+        validate_data_quality(metrics, 30)

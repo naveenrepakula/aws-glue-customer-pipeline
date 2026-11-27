@@ -6,5 +6,17 @@
   {
     "ParameterKey": "ProjectName",
     "ParameterValue": "customer-pipeline"
+  },
+  {
+    "ParameterKey": "LambdaArtifactBucket",
+    "ParameterValue": "customer-pipeline-dev-439701543859-glue-artifacts"
+  },
+  {
+    "ParameterKey": "LambdaArtifactKey",
+    "ParameterValue": "releases/current/trigger_glue.zip"
+  },
+  {
+    "ParameterKey": "GlueJobName",
+    "ParameterValue": "COADP-Customer-ETL-DEV"
   }
 ]

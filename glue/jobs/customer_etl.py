@@ -14,50 +14,11 @@ from glue.libraries.transformations import (
     CUSTOMER_SCHEMA,
     transform_customer_data,
     calculate_data_quality_metrics,
+    validate_data_quality,
 )
 
 
-# --------------------------------------------------
-# 1. Function to write audit records
-# --------------------------------------------------
-
-def write_audit_log(
-    bucket_name: str,
-    audit_key: str,
-    audit_data: dict,
-) -> str:
-
-    # Check whether local audit mode is enabled
-    local_audit_dir = os.getenv("COADP_LOCAL_AUDIT_DIR")
-
-    if local_audit_dir:
-
-        # Write audit JSON locally during Docker testing
-        audit_file = Path(local_audit_dir) / audit_key
-
-        audit_file.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        audit_file.write_text(
-            json.dumps(audit_data, indent=2),
-            encoding="utf-8",
-        )
-
-        return str(audit_file)
-
-    # Write audit JSON to S3 during AWS Glue execution
-    s3_client = boto3.client("s3")
-
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key=audit_key,
-        Body=json.dumps(audit_data).encode("utf-8"),
-        ContentType="application/json",
-    )
-
-    return f"s3://{bucket_name}/{audit_key}"
+from glue.libraries.audit import write_audit_log
 
 
 # --------------------------------------------------
@@ -72,6 +33,7 @@ args = getResolvedOptions(
         "curated_path",
         "rejected_path",
         "max_rejection_percentage",
+        "audit_bucket",
     ],
 )
 
@@ -84,7 +46,7 @@ rejected_path = args["rejected_path"]
 # 3. Configure audit location
 # --------------------------------------------------
 
-AUDIT_BUCKET = "customer-pipeline-dev-439701543859-data"
+AUDIT_BUCKET = args["audit_bucket"]
 
 audit_timestamp = datetime.now(timezone.utc).strftime(
     "%Y%m%dT%H%M%S%fZ"
@@ -128,16 +90,7 @@ MAX_REJECTION_PERCENTAGE = None
 
 try:
 
-    # Read and validate the configured rejection threshold
-    MAX_REJECTION_PERCENTAGE = float(
-        args["max_rejection_percentage"]
-    )
-
-    if not 0 <= MAX_REJECTION_PERCENTAGE <= 100:
-
-        raise ValueError(
-            "max_rejection_percentage must be between 0 and 100"
-        )
+    MAX_REJECTION_PERCENTAGE = float(args["max_rejection_percentage"])
 
     # Read customer CSV
     customer_df = (
@@ -148,50 +101,16 @@ try:
     )
 
     # Clean, validate, and split customer records
-    valid_df, rejected_df = transform_customer_data(
-        customer_df
-    )
+    valid_df, rejected_df = transform_customer_data(customer_df)
 
-    # Calculate data quality metrics
+    # Calculate and enforce data quality metrics
     dq_metrics = calculate_data_quality_metrics(
         customer_df,
         valid_df,
         rejected_df,
     )
-
-    # Log data quality metrics
-    logger.info(
-        f"Customer Data Quality Metrics: {dq_metrics}"
-    )
-
-    # Check record count reconciliation
-    if dq_metrics["reconciliation_status"] == "FAILED":
-
-        logger.error(
-            f"Record count reconciliation failed: {dq_metrics}"
-        )
-
-        raise ValueError(
-            "ETL failed: Source and processed record "
-            "counts do not match"
-        )
-
-    # Check rejection threshold using exact counts
-    if (
-        dq_metrics["rejected_records"] * 100
-        > MAX_REJECTION_PERCENTAGE
-        * dq_metrics["source_records"]
-    ):
-
-        logger.error(
-            f"Rejection threshold exceeded: {dq_metrics}"
-        )
-
-        raise ValueError(
-            f"ETL failed: Rejection percentage "
-            f"{dq_metrics['rejection_percentage']}% "
-            f"exceeds allowed {MAX_REJECTION_PERCENTAGE}%"
-        )
+    logger.info(f"Customer Data Quality Metrics: {dq_metrics}")
+    validate_data_quality(dq_metrics, MAX_REJECTION_PERCENTAGE)
 
     # Write valid customers as Parquet
     valid_df.write.mode("overwrite").parquet(
@@ -203,12 +122,12 @@ try:
         rejected_path
     )
 
-    # Commit the Glue job after successful writes
-    job.commit()
-
-    # Prepare successful execution audit
+    # Prepare successful execution audit before committing job bookmarks
     audit_data = {
         "job_name": args["JOB_NAME"],
+        "input_path": input_path,
+        "curated_path": curated_path,
+        "rejected_path": rejected_path,
         "execution_timestamp": datetime.now(
             timezone.utc
         ).isoformat(),
@@ -238,6 +157,9 @@ try:
         f"ETL success audit written to {audit_location}"
     )
 
+    # Commit Glue bookmarks only after outputs and success audit are durable.
+    job.commit()
+
 
 # --------------------------------------------------
 # 7. Handle ETL failures
@@ -252,6 +174,9 @@ except Exception as error:
     # Prepare failed execution audit
     failure_audit_data = {
         "job_name": args["JOB_NAME"],
+        "input_path": input_path,
+        "curated_path": curated_path,
+        "rejected_path": rejected_path,
         "execution_timestamp": datetime.now(
             timezone.utc
         ).isoformat(),

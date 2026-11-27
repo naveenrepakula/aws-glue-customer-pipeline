@@ -18,6 +18,8 @@
     "--input_path": "s3://customer-pipeline-dev-439701543859-data/raw/customers/customers.csv",
     "--curated_path": "s3://customer-pipeline-dev-439701543859-data/curated/customers/dev-test/",
     "--rejected_path": "s3://customer-pipeline-dev-439701543859-data/rejected/customers/dev-test/",
+    "--audit_bucket": "customer-pipeline-dev-439701543859-data",
+    "--max_rejection_percentage": "30",
     "--enable-job-insights": "true"
   }
 }

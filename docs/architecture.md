@@ -319,3 +319,88 @@ Amazon Athena
 ```
 
 Additional monitoring and orchestration components can include Amazon CloudWatch and Apache Airflow.
+
+
+---
+
+## Apache Airflow Orchestration
+
+The local Airflow deployment schedules and monitors the existing AWS Glue job.
+It does not duplicate the PySpark transformation logic.
+
+```text
+Amazon S3 raw/customers/
+          |
+          v
+Airflow S3KeySensor
+          |
+          v
+Airflow GlueJobOperator
+          |
+          v
+AWS Glue / PySpark
+          |
+          +-------------------------+
+          |                         |
+          v                         v
+S3 curated/customers/        S3 rejected/customers/
+```
+
+The DAG is located at `airflow/dags/customer_pipeline_dag.py`. It runs daily
+at 01:00 Asia/Kolkata, waits for the configured S3 object, starts the configured
+Glue job, waits for completion, and retries failed tasks twice.
+
+See [airflow-setup.md](airflow-setup.md) for local Docker Compose setup,
+AWS connection configuration, minimum permissions, and manual execution.
+
+
+---
+
+## Implemented event-driven architecture and scheduled orchestration
+
+The intended architecture is preserved:
+
+```text
+Source customer CSV
+       |
+       v
+Amazon S3 - Raw
+       |
+       | ObjectCreated event through EventBridge
+       v
+AWS Lambda
+       |  DynamoDB idempotency check
+       |  StartJobRun
+       v
+AWS Glue + PySpark
+       |                         |
+       v                         v
+Curated S3                 Rejected S3
+Valid Parquet              Invalid records + reasons
+       |
+       v
+AWS Glue Data Catalog / Crawler
+       |
+       v
+Amazon Athena
+
+Apache Airflow - daily schedule, input sensor, Lambda invoke,
+                  Glue run monitoring, crawler refresh and retries
+GitHub Actions - automated offline tests for each code change
+```
+
+S3 EventBridge invokes Lambda on raw-prefix object creation. Lambda uses
+bucket + key + ETag as an idempotency key in DynamoDB before starting the
+existing Glue ETL job. Airflow is a separate scheduled control plane: it
+waits for the date-keyed input, invokes the same Lambda entry point, monitors
+the returned Glue JobRunId and refreshes the Glue crawler after success.
+The shared ETag key prevents the event-driven and scheduled triggers from
+normally starting duplicate Glue runs for the same object version.
+
+The CloudFormation template provisions the event routing, Lambda execution
+role/function, idempotency table, Glue Catalog database/crawler and Athena
+workgroup. The existing Glue job remains a separately deployed resource and
+must be named in the template parameters.
+
+See [airflow-setup.md](airflow-setup.md) for deployment prerequisites,
+permissions, local Airflow setup, test commands and known operational limits.

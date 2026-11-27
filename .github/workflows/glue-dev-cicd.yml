@@ -10,7 +10,6 @@ on:
       - main
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -36,17 +35,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyspark==3.5.6 pytest
+          pip install pyspark==3.5.6 pytest boto3 cfn-lint
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/unit/test_transformations.py -v
+          python -m pytest tests/unit tests/integration -v
+          python -m compileall -q airflow/dags lambda/trigger_glue
+          python -m json.tool infrastructure/parameters/dev.json > /dev/null
+          cfn-lint -t infrastructure/template.yaml
+          cp .env.example .env
+          docker compose config --quiet
 
   deploy-dev:
     name: Deploy AWS Glue DEV
     needs: unit-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -63,6 +70,7 @@ jobs:
               "glue/__init__.py",
               "glue/libraries/__init__.py",
               "glue/libraries/transformations.py",
+              "glue/libraries/audit.py",
           ]
 
           Path("dist").mkdir(exist_ok=True)
@@ -75,6 +83,12 @@ jobs:
               assert archive.testzip() is None
               assert set(files).issubset(set(archive.namelist()))
               print("Successfully packaged:", archive.namelist())
+
+          with ZipFile("dist/trigger_glue.zip", "w", ZIP_DEFLATED) as archive:
+              archive.write("lambda/trigger_glue/handler.py", arcname="handler.py")
+          with ZipFile("dist/trigger_glue.zip") as archive:
+              assert archive.testzip() is None
+              assert "handler.py" in archive.namelist()
           PY
 
       - name: Configure AWS credentials using OIDC
