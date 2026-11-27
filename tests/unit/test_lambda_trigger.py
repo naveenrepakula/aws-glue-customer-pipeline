@@ -41,7 +41,8 @@ class FakeTable:
     def update_item(self, **kwargs):
         self.updates.append(kwargs)
         values = kwargs.get("ExpressionAttributeValues", {})
-        if self.item is not None:
+        if self.item is not None and "REMOVE job_run_id" in kwargs.get("UpdateExpression", ""):
+            self.item.pop("job_run_id", None)
             if ":run_id" in values:
                 self.item["job_run_id"] = values[":run_id"]
             if ":started" in values:
@@ -60,8 +61,12 @@ class FakeDynamoDB:
 
 
 class FakeGlue:
-    def __init__(self):
+    def __init__(self, prior_state="RUNNING"):
         self.calls = []
+        self.prior_state = prior_state
+
+    def get_job_run(self, **kwargs):
+        return {"JobRun": {"JobRunState": self.prior_state}}
 
     def start_job_run(self, **kwargs):
         self.calls.append(kwargs)
@@ -150,3 +155,30 @@ def test_ignores_non_customer_prefix(monkeypatch):
 
     assert result["status"] == "IGNORED"
     assert glue.calls == []
+
+
+def test_failed_glue_run_can_be_restarted_for_same_object(monkeypatch):
+    table = FakeTable(
+        {
+            "object_id": "customer-data/raw/customers/customers_20261127.csv#etag-001",
+            "status": "STARTED",
+            "job_run_id": "jr_failed",
+        }
+    )
+    glue = FakeGlue(prior_state="FAILED")
+    monkeypatch.setattr(handler_module, "dynamodb", FakeDynamoDB(table))
+    monkeypatch.setattr(handler_module, "glue", glue)
+
+    result = handler_module.lambda_handler(
+        {
+            "bucket": "customer-data",
+            "key": "raw/customers/customers_20261127.csv",
+            "etag": "etag-001",
+        },
+        None,
+    )
+
+    assert result["status"] == "STARTED"
+    assert result["job_run_id"] == "jr_test_123"
+    assert result["duplicate"] is False
+    assert len(glue.calls) == 1
