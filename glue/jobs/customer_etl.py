@@ -14,6 +14,7 @@ from glue.libraries.transformations import (
     CUSTOMER_SCHEMA,
     transform_customer_data,
     calculate_data_quality_metrics,
+    validate_data_quality,
 )
 
 
@@ -89,16 +90,7 @@ MAX_REJECTION_PERCENTAGE = None
 
 try:
 
-    # Read and validate the configured rejection threshold
-    MAX_REJECTION_PERCENTAGE = float(
-        args["max_rejection_percentage"]
-    )
-
-    if not 0 <= MAX_REJECTION_PERCENTAGE <= 100:
-
-        raise ValueError(
-            "max_rejection_percentage must be between 0 and 100"
-        )
+    MAX_REJECTION_PERCENTAGE = float(args["max_rejection_percentage"])
 
     # Read customer CSV
     customer_df = (
@@ -109,50 +101,16 @@ try:
     )
 
     # Clean, validate, and split customer records
-    valid_df, rejected_df = transform_customer_data(
-        customer_df
-    )
+    valid_df, rejected_df = transform_customer_data(customer_df)
 
-    # Calculate data quality metrics
+    # Calculate and enforce data quality metrics
     dq_metrics = calculate_data_quality_metrics(
         customer_df,
         valid_df,
         rejected_df,
     )
-
-    # Log data quality metrics
-    logger.info(
-        f"Customer Data Quality Metrics: {dq_metrics}"
-    )
-
-    # Check record count reconciliation
-    if dq_metrics["reconciliation_status"] == "FAILED":
-
-        logger.error(
-            f"Record count reconciliation failed: {dq_metrics}"
-        )
-
-        raise ValueError(
-            "ETL failed: Source and processed record "
-            "counts do not match"
-        )
-
-    # Check rejection threshold using exact counts
-    if (
-        dq_metrics["rejected_records"] * 100
-        > MAX_REJECTION_PERCENTAGE
-        * dq_metrics["source_records"]
-    ):
-
-        logger.error(
-            f"Rejection threshold exceeded: {dq_metrics}"
-        )
-
-        raise ValueError(
-            f"ETL failed: Rejection percentage "
-            f"{dq_metrics['rejection_percentage']}% "
-            f"exceeds allowed {MAX_REJECTION_PERCENTAGE}%"
-        )
+    logger.info(f"Customer Data Quality Metrics: {dq_metrics}")
+    validate_data_quality(dq_metrics, MAX_REJECTION_PERCENTAGE)
 
     # Write valid customers as Parquet
     valid_df.write.mode("overwrite").parquet(
