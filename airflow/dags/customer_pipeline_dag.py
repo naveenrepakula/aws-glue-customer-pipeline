@@ -48,29 +48,62 @@ def start_pipeline_from_lambda(bucket, key, **context):
     if result.get("status") != "STARTED" or not result.get("job_run_id"):
         raise RuntimeError(f"Lambda did not start a new Glue run: {result}")
     context["ti"].xcom_push(key="glue_job_run_id", value=result["job_run_id"])
+    context["ti"].xcom_push(key="source_key", value=key)
+    context["ti"].xcom_push(key="source_etag", value=etag)
     return result["job_run_id"]
 
 
 def glue_run_finished(job_name, **context):
-    """Poll Glue status for the run started by the Lambda task."""
+    """Poll Glue and restart a terminally failed run up to two times."""
     ti = context["ti"]
-    run_id = ti.xcom_pull(task_ids="invoke_customer_lambda", key="glue_job_run_id")
+    run_id = (
+        ti.xcom_pull(task_ids="wait_for_glue_completion", key="glue_job_run_id")
+        or ti.xcom_pull(task_ids="invoke_customer_lambda", key="glue_job_run_id")
+    )
     if not run_id:
         raise RuntimeError("Missing Glue JobRunId from Lambda invocation")
-    client = AwsBaseHook(
+
+    glue = AwsBaseHook(
         aws_conn_id=AWS_CONN_ID, client_type="glue", region_name=AWS_REGION
     ).get_conn()
-    run = client.get_job_run(
+    run = glue.get_job_run(
         JobName=job_name, RunId=run_id, PredecessorsIncluded=False
     )["JobRun"]
     state = run["JobRunState"]
+
     if state == "SUCCEEDED":
         return True
     if state in {"FAILED", "TIMEOUT", "ERROR", "STOPPED", "EXPIRED"}:
-        raise RuntimeError(
-            f"Glue job {job_name} run {run_id} ended with {state}: "
-            f"{run.get('ErrorMessage', 'No Glue error message')}"
+        retry_count = ti.xcom_pull(
+            task_ids="wait_for_glue_completion", key="glue_retry_count"
+        ) or 0
+        if retry_count >= 2:
+            raise RuntimeError(
+                f"Glue run failed after {retry_count} automatic retries: "
+                f"{run.get('ErrorMessage', state)}"
+            )
+
+        # Reinvoke the same Lambda with the same ETag. Lambda checks the
+        # previous Glue run state and only starts a new run if it failed.
+        key = ti.xcom_pull(task_ids="invoke_customer_lambda", key="source_key")
+        etag = ti.xcom_pull(task_ids="invoke_customer_lambda", key="source_etag")
+        payload = {"bucket": DATA_BUCKET, "key": key, "etag": etag}
+        lambda_client = AwsBaseHook(
+            aws_conn_id=AWS_CONN_ID, client_type="lambda", region_name=AWS_REGION
+        ).get_conn()
+        response = lambda_client.invoke(
+            FunctionName=TRIGGER_LAMBDA,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(payload).encode("utf-8"),
         )
+        result = json.loads(response["Payload"].read().decode("utf-8"))
+        if response.get("FunctionError") or result.get("status") != "STARTED":
+            raise RuntimeError(f"Lambda could not restart failed Glue run: {result}")
+
+        ti.xcom_push(key="glue_job_run_id", value=result["job_run_id"])
+        ti.xcom_push(key="glue_retry_count", value=retry_count + 1)
+        return False
+
     return False
 
 
