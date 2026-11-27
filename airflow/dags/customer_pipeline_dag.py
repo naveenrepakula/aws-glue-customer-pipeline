@@ -11,7 +11,8 @@ from datetime import timedelta
 import boto3
 import pendulum
 from airflow import DAG
-from airflow.operators.python import PythonOperator, PythonSensor
+from airflow.operators.python import PythonOperator
+from airflow.sensors.python import PythonSensor
 from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.amazon.aws.operators.glue_crawler import GlueCrawlerOperator
