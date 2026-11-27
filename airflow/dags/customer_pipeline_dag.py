@@ -17,7 +17,7 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-south-1")
 DATA_BUCKET = os.getenv("CUSTOMER_DATA_BUCKET")
 INPUT_KEY = os.getenv(
     "CUSTOMER_INPUT_KEY",
-    "raw/customers/customers.csv",
+    "raw/customers/customers_{{ ds_nodash }}.csv",
 )
 GLUE_JOB_NAME = os.getenv(
     "CUSTOMER_GLUE_JOB_NAME",
