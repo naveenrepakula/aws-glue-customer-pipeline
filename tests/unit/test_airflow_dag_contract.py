@@ -18,6 +18,7 @@ def test_dag_preserves_s3_lambda_glue_catalog_flow():
     assert "S3KeySensor(" in source
     assert "PythonOperator(" in source
     assert "PythonSensor(" in source
+    assert "from airflow.sensors.python import PythonSensor" in source
     assert "GlueCrawlerOperator(" in source
     assert (
         "wait_for_customer_file\n"
