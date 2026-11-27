@@ -209,3 +209,24 @@ def calculate_data_quality_metrics(
         "rejection_percentage": rejection_percentage,
         "reconciliation_status": reconciliation_status,
     }
+def validate_data_quality(metrics: dict, max_rejection_percentage: float) -> None:
+    """Fail the ETL run when reconciliation or the rejection threshold fails."""
+    if not 0 <= max_rejection_percentage <= 100:
+        raise ValueError("max_rejection_percentage must be between 0 and 100")
+
+    if metrics["reconciliation_status"] != "PASSED":
+        raise ValueError(
+            "ETL failed: source and processed record counts do not reconcile"
+        )
+
+    source_records = metrics["source_records"]
+    rejected_records = metrics["rejected_records"]
+    if (
+        source_records > 0
+        and rejected_records * 100 > max_rejection_percentage * source_records
+    ):
+        raise ValueError(
+            f"ETL failed: rejection percentage "
+            f"{metrics['rejection_percentage']}% exceeds allowed "
+            f"{max_rejection_percentage}%"
+        )
