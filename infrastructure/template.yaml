@@ -62,7 +62,8 @@ Resources:
   CustomerPipelineCatalog:
     Type: AWS::Glue::Database
     Properties:
-      CatalogInput:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
         Name: !Sub '${ProjectName}_${Environment}'
         Description: Customer pipeline curated and rejected datasets
 
