@@ -64,7 +64,7 @@ Resources:
     Properties:
       CatalogId: !Ref AWS::AccountId
       DatabaseInput:
-        Name: !Sub '${ProjectName}_${Environment}'
+        Name: !Sub '${Environment}_customer_pipeline'
         Description: Customer pipeline curated and rejected datasets
 
   CustomerPipelineIdempotency:
