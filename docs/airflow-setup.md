@@ -166,8 +166,10 @@ Asia/Kolkata. It:
 2. Invokes the Lambda with bucket, key and object ETag.
 3. Waits for that exact Glue JobRunId and fails if Glue reports a terminal
    failure.
-4. Starts the Glue crawler after Glue succeeds.
-5. Retries failed Airflow tasks twice, with a five-minute delay.
+4. If Glue reaches a terminal failure, invokes Lambda again for the same S3
+   ETag and starts a replacement Glue run, up to two times.
+5. Starts the Glue crawler only after Glue succeeds.
+6. Retries failed Airflow tasks twice, with a five-minute delay.
 
 Unpause the DAG in the Airflow UI. For a manual test, ensure the matching
 date-keyed input file exists, then select **Trigger DAG**. S3 event delivery
@@ -200,9 +202,10 @@ those integrations in DEV only after the AWS stack and job are deployed.
   version and starts a new run.
 - The Glue ETL currently writes with overwrite mode. Use unique run-date
   output prefixes and confirm rerun behavior before production use.
-- Airflow retries a failed task; it does not blindly retry a Glue run that
-  has already reached a terminal failed state. Investigate the Glue error,
-  correct the cause, and trigger a controlled rerun.
+- The Glue completion sensor can restart a terminally failed Glue run up to
+  two times by invoking Lambda with the same object ETag. Lambda checks the
+  previous Glue state before starting another run. After those bounded retries,
+  inspect Glue/CloudWatch logs, fix the cause, and trigger a controlled rerun.
 - The crawler runs only after a successful Glue run. Athena tables become
   queryable after the crawler completes.
 - The local Docker Compose Airflow stack is for development, not a secured
