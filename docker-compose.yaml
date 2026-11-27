@@ -38,7 +38,7 @@ services:
       CUSTOMER_GLUE_JOB_NAME: ${CUSTOMER_GLUE_JOB_NAME:-COADP-Customer-ETL-DEV}
       CUSTOMER_TRIGGER_LAMBDA: ${CUSTOMER_TRIGGER_LAMBDA:-customer-pipeline-dev-trigger-glue}
       CUSTOMER_GLUE_CRAWLER_NAME: ${CUSTOMER_GLUE_CRAWLER_NAME:-customer-pipeline-dev-customer-crawler}
-      MAX_REJECTION_PERCENTAGE: ${MAX_REJECTION_PERCENTAGE:-20}
+      MAX_REJECTION_PERCENTAGE: ${MAX_REJECTION_PERCENTAGE:-30}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
