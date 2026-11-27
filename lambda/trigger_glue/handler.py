@@ -25,6 +25,13 @@ def _extract_object(event):
             "key": unquote_plus(s3["object"]["key"]),
             "etag": s3["object"].get("eTag", "").strip('"'),
         }
+    if event.get("source") == "aws.s3" and "detail" in event:
+        detail = event["detail"]
+        return {
+            "bucket": detail["bucket"]["name"],
+            "key": unquote_plus(detail["object"]["key"]),
+            "etag": detail["object"].get("etag", "").strip('"'),
+        }
     return {
         "bucket": event["bucket"],
         "key": event["key"],
