@@ -87,7 +87,7 @@ def lambda_handler(event, context):
                 ExpressionAttributeNames={"#s": "status"},
                 ExpressionAttributeValues={":starting": "STARTING", ":now": now},
             )
-        if existing.get("status") == "START_FAILED":
+        elif existing.get("status") == "START_FAILED":
             # A previous start attempt failed before receiving a Glue JobRunId.
             # Reclaim the same object key so a later S3/Airflow retry can recover.
             table.update_item(
