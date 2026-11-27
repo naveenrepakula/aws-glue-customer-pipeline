@@ -95,7 +95,7 @@ cp .env.example .env
 docker compose config --quiet
 ```
 
-The GitHub Actions workflow runs the unit and integration tests, Python compilation, DEV parameter JSON validation, CloudFormation lint, and Docker Compose configuration validation on feature-branch pushes and pull requests to `main`. Deployment is restricted to pushes to `main`; the feature-branch test workflow does not deploy to AWS.
+The GitHub Actions workflow runs the unit and integration tests, Python compilation, DEV parameter JSON validation, CloudFormation lint, and Docker Compose configuration validation on feature-branch pushes and pull requests to `main`. It is validation-only: it does not upload artifacts, update AWS resources, invoke Lambda, or start Glue. Any deployment requires a separate explicit approval and reviewed execution plan.
 
 ## Run Airflow locally
 
@@ -141,6 +141,12 @@ The CloudFormation template expects the existing Glue ETL job and a packaged Lam
 - Review least-privilege policies separately for Airflow, Lambda, Glue job execution, and crawler roles.
 - Configure production Airflow authentication, RBAC, managed secrets, backups, and monitoring.
 - Run end-to-end integration tests in DEV before describing the AWS deployment as production-verified.
+- Enable S3 EventBridge delivery on the existing data bucket while preserving any existing bucket notification destinations.
+- Align the Glue execution role's artifact read scope with the `releases/<revision>/` paths used by release packaging.
+- Define recovery for an idempotency record stuck in `STARTING` and avoid treating this mechanism as exactly-once processing.
+- Ensure distinct source objects cannot overwrite one another when they map to the same `run_date` output prefix.
+- Schedule a crawler refresh for successful EventBridge-triggered runs if no Airflow run follows them.
+- Grant Athena callers Catalog/query permissions and access to the workgroup results prefix; the workgroup alone does not grant access.
 
 ## Portfolio summary
 

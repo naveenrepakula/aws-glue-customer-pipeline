@@ -8,12 +8,16 @@
     "ParameterValue": "customer-pipeline"
   },
   {
+    "ParameterKey": "CustomerDataBucketName",
+    "ParameterValue": "customer-pipeline-dev-439701543859-data"
+  },
+  {
     "ParameterKey": "LambdaArtifactBucket",
     "ParameterValue": "customer-pipeline-dev-439701543859-glue-artifacts"
   },
   {
     "ParameterKey": "LambdaArtifactKey",
-    "ParameterValue": "releases/current/trigger_glue.zip"
+    "ParameterValue":"lambda/trigger_glue.zip"
   },
   {
     "ParameterKey": "GlueJobName",

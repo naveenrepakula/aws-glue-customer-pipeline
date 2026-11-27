@@ -44,7 +44,8 @@ normally start two Glue runs for the same object version.
   idempotency key, and starts the existing Glue job.
 - `infrastructure/template.yaml`: provisions EventBridge routing, Lambda
   execution role/function, DynamoDB idempotency table, Glue database/crawler,
-  Athena workgroup and S3 buckets.
+  and Athena workgroup. It references existing S3 buckets and does not create
+  or modify their bucket-level notification configuration.
 - `airflow/dags/customer_pipeline_dag.py`: scheduled sensor -> Lambda ->
   Glue completion sensor -> Catalog crawler workflow.
 - `tests/unit/test_lambda_trigger.py`: offline Lambda event, Glue arguments,
@@ -117,6 +118,13 @@ results location. Keep these identities separate; do not grant broad S3
 delete permissions to Airflow or Lambda.
 
 ## 4. Deploy AWS infrastructure
+
+This section describes a manual deployment procedure. Do not run it until
+there is explicit approval for the target account, stack, artifact upload,
+and resource changes. The repository workflow is validation-only and does
+not deploy, upload, invoke Lambda, or start Glue. Keep the existing Glue job
+name `COADP-Customer-ETL-DEV`; the template references it and does not create
+or replace it. Do not target the unrelated `cdp-customer-pipeline-dev` Lambda.
 
 The CloudFormation template now includes the Lambda, EventBridge rule,
 DynamoDB table, Glue database/crawler and Athena workgroup. The Lambda ZIP must be uploaded to the existing DEV Glue artifacts bucket

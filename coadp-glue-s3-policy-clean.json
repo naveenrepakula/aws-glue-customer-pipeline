@@ -14,7 +14,10 @@
       "Sid": "ReadDeploymentArtifacts",
       "Effect": "Allow",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::customer-pipeline-dev-439701543859-glue-artifacts/glue/*"
+      "Resource": [
+        "arn:aws:s3:::customer-pipeline-dev-439701543859-glue-artifacts/glue/*",
+        "arn:aws:s3:::customer-pipeline-dev-439701543859-glue-artifacts/releases/*"
+      ]
     },
     {
       "Sid": "ReadAndWriteDevCustomerData",
