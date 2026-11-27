@@ -30,7 +30,7 @@ services:
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
       AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW_AWS_CONN_ID: ${AIRFLOW_AWS_CONN_ID:-aws_glue_conn}
-      AIRFLOW_CONN_AWS_GLUE_CONN: '{"conn_type":"aws","extra":{"region_name":"${AWS_DEFAULT_REGION:-ap-south-1}"}}'
+      AIRFLOW_CONN_AWS_GLUE_CONN: "{\"conn_type\":\"aws\",\"extra\":{\"region_name\":\"${AWS_DEFAULT_REGION:-ap-south-1}\"}}"
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-south-1}
       AWS_PROFILE: ${AWS_PROFILE:-default}
       CUSTOMER_DATA_BUCKET: ${CUSTOMER_DATA_BUCKET:?Set CUSTOMER_DATA_BUCKET in .env}
