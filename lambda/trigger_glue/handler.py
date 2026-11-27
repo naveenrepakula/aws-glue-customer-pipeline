@@ -95,7 +95,6 @@ def lambda_handler(event, context):
         "--rejected_path": f"s3://{bucket}/rejected/customers/run_date={run_date}/",
         "--max_rejection_percentage": os.getenv("MAX_REJECTION_PERCENTAGE", "30"),
         "--audit_bucket": bucket,
-        "--audit_bucket": bucket,
     }
 
     try:
