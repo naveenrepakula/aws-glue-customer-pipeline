@@ -75,7 +75,7 @@ Resources:
               - Sid: CreateLambdaLogGroup
                 Effect: Allow
                 Action: logs:CreateLogGroup
-                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-${Environment}-trigger-glue'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-${Environment}-trigger-glue:*'
               - Sid: WriteLambdaLogStreams
                 Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
