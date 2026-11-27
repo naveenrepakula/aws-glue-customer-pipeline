@@ -73,7 +73,17 @@ def lambda_handler(event, context):
                 "job_run_id": existing["job_run_id"],
                 "duplicate": True,
             }
-        raise RuntimeError("A concurrent invocation is already starting this Glue run; retry shortly")
+        if existing.get("status") == "START_FAILED":
+            # A previous start attempt failed before receiving a Glue JobRunId.
+            # Reclaim the same object key so a later S3/Airflow retry can recover.
+            table.update_item(
+                Key={"object_id": object_id},
+                UpdateExpression="SET #s = :starting, created_at = :now",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":starting": "STARTING", ":now": now},
+            )
+        else:
+            raise RuntimeError("A concurrent invocation is already starting this Glue run; retry shortly")
 
     run_date = key.rsplit("/", 1)[-1].replace("customers_", "").replace(".csv", "")
     if len(run_date) != 8 or not run_date.isdigit():
