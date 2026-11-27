@@ -40,7 +40,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/unit -v
+          python -m pytest tests/unit tests/integration -v
           python -m compileall -q airflow/dags lambda/trigger_glue
 
   deploy-dev:
@@ -64,6 +64,7 @@ jobs:
               "glue/__init__.py",
               "glue/libraries/__init__.py",
               "glue/libraries/transformations.py",
+              "glue/libraries/audit.py",
           ]
 
           Path("dist").mkdir(exist_ok=True)
@@ -76,6 +77,12 @@ jobs:
               assert archive.testzip() is None
               assert set(files).issubset(set(archive.namelist()))
               print("Successfully packaged:", archive.namelist())
+
+          with ZipFile("dist/trigger_glue.zip", "w", ZIP_DEFLATED) as archive:
+              archive.write("lambda/trigger_glue/handler.py", arcname="handler.py")
+          with ZipFile("dist/trigger_glue.zip") as archive:
+              assert archive.testzip() is None
+              assert "handler.py" in archive.namelist()
           PY
 
       - name: Configure AWS credentials using OIDC
