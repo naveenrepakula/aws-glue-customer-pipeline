@@ -105,6 +105,10 @@ The Lambda execution role is separate. The CloudFormation template grants it:
 - DynamoDB GetItem/PutItem/UpdateItem on the idempotency table
 - CloudWatch Logs write permissions
 
+The DEV sample threshold is 30% so the included seven-row sample file
+(five valid, two rejected) can complete successfully. Set a stricter value
+when your actual source quality baseline is known.
+
 The Glue job execution role must independently be able to read raw S3,
 write curated/rejected Parquet and write audit JSON to the configured data
 bucket. The crawler role needs read access to curated/rejected prefixes.
