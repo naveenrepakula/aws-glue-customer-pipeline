@@ -68,20 +68,17 @@ Open http://localhost:8080 and sign in with the local development account:
 Change this development password if you expose the service beyond localhost.
 Do not use these credentials in a shared or production environment.
 
-## 3. Configure the Airflow AWS connection
+## 3. Airflow AWS connection
 
-In Airflow UI, open **Admin → Connections → Add a new record**:
+Docker Compose provisions the `aws_glue_conn` connection automatically using
+the `AIRFLOW_CONN_AWS_GLUE_CONN` environment variable. It contains only the
+AWS region; it deliberately contains no static access keys or secret keys.
+The AWS provider uses the mounted host profile / default boto3 credential
+chain. The DAG reads the connection ID from `AIRFLOW_AWS_CONN_ID`.
 
-| Field | Value |
-|---|---|
-| Connection Id | `aws_glue_conn` |
-| Connection Type | `Amazon Web Services` |
-| AWS Access Key ID | Leave blank when using the mounted AWS profile / role |
-| AWS Secret Access Key | Leave blank when using the mounted AWS profile / role |
-| Extra | `{"region_name":"ap-south-1"}` (change if required) |
-
-The DAG reads the connection ID from `AIRFLOW_AWS_CONN_ID`. For a non-default
-ID, update `.env` and restart the Airflow services.
+To use a different connection ID, update `AIRFLOW_AWS_CONN_ID` and the matching
+`AIRFLOW_CONN_<CONNECTION_ID>` environment variable in `docker-compose.yaml`,
+then recreate the Airflow containers.
 
 The AWS identity must have, at minimum, permission to:
 - `s3:GetObject` and `s3:ListBucket` for the configured raw input
